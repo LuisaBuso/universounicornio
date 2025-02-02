@@ -323,9 +323,9 @@ async def create_preference(request: PreferenceRequest):
             ],
             "external_reference": pedido_id,  # Usar el ObjectId como referencia externa
             "back_urls": {
-                "success": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}/success",
-                "failure": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}/failure",
-                "pending": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}/pending",
+                "success": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}",
+                "failure": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}",
+                "pending": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}",
             },
             "auto_return": "approved",
             "notification_url": "https://api.unicornio.tech/webhook",
