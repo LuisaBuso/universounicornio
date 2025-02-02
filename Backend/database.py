@@ -2,9 +2,14 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 from datetime import timedelta, datetime, timezone
 import jwt
+from dotenv import load_dotenv
+import os
+
+# Cargar variables de entorno desde el archivo .env
+load_dotenv()
 
 # Conexión a MongoDB Atlas
-uri = "mongodb+srv://universe2:htwBOjoJTNAks8EB@cluster0.qs6hs.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+uri = os.getenv("MONGODB_URI")
 client = AsyncIOMotorClient(uri)
 db = client["universe"]
 collection_client = db["client"]
