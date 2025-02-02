@@ -47,7 +47,7 @@ export function ContactDetails({ contact, onClose }: ContactDetailsProps) {
 
       try {
         const response = await fetch(
-          `http://127.0.0.1:8000/orders-by-client/${contact.email}`,
+          `https://api.unicornio.tech/orders-by-client/${contact.email}`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
