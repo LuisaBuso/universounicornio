@@ -323,12 +323,12 @@ async def create_preference(request: PreferenceRequest):
             ],
             "external_reference": pedido_id,  # Usar el ObjectId como referencia externa
             "back_urls": {
-                "success": f"https://rizosfelicesmx.unicornio.tech?ref={request.ref}/success",
-                "failure": f"https://rizosfelicesmx.unicornio.tech?ref={request.ref}/failure",
-                "pending": f"https://rizosfelicesmx.unicornio.tech?ref={request.ref}/pending",
+                "success": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}/success",
+                "failure": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}/failure",
+                "pending": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}/pending",
             },
             "auto_return": "approved",
-            "notification_url": "https://dimensions-separated-windsor-thumbnail.trycloudflare.com/webhook",
+            "notification_url": "https://api.unicornio.tech/webhook",
         }
 
         # Crear la preferencia en Mercado Pago
@@ -536,7 +536,7 @@ async def get_orders_by_ambassador(current_user: str = Depends(get_current_user)
 
     return order_list
     
-@app.post("/webhookk")
+@app.post("/webhook")
 async def webhook(request: Request):
     """
     Webhook para recibir notificaciones de Mercado Pago, consultar detalles del pago y guardarlos en MongoDB.
