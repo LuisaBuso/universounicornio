@@ -54,7 +54,7 @@ export default function CheckoutEnvio() {
     if (!formData.direccion.trim()) newErrors.direccion = "La dirección es obligatoria";
     if (!formData.estado.trim()) newErrors.estado = "El estado es obligatorio";
     if (!formData.ciudad.trim()) newErrors.ciudad = "La ciudad es obligatoria";
-    if (!formData.telefono.trim()) newErrors.telefono = "El teléfono es obligatorio";
+    if (!formData.telefono.trim()) newErrors.telefono = "El celular es obligatorio";
     if (!formData.email.trim()) newErrors.email = "El correo electrónico es obligatorio";
     if (formData.email && !/^\S+@\S+\.\S+$/.test(formData.email)) {
       newErrors.email = "El correo electrónico no es válido";
@@ -195,7 +195,7 @@ export default function CheckoutEnvio() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="estado">Estado / Municipio *</Label>
+                  <Label htmlFor="estado">Región / Estado *</Label>
                   <Input
                     id="estado"
                     name="estado"
@@ -227,7 +227,7 @@ export default function CheckoutEnvio() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="telefono">Teléfono *</Label>
+                <Label htmlFor="telefono">Celular *</Label>
                 <Input
                   id="telefono"
                   name="telefono"

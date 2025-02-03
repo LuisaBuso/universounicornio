@@ -502,19 +502,35 @@ async def get_orders_by_ambassador(current_user: str = Depends(get_current_user)
             "transaction_id": transaction_id
         }
         await collection_pedidos.update_one({"_id": order_id}, {"$set": updated_order})
-        # Guardar o actualizar el cliente en collection_client
+
+        # Validar y guardar o actualizar el cliente en collection_client
+        existing_client = await collection_client.find_one(
+            {"correo_electronico": order.get('correo_electronico'), "telefono": order.get('telefono')}
+        )
+        
         cliente_data = {
             "nombre": order.get('nombre'),
             "correo_electronico": order.get('correo_electronico'),
             "telefono": order.get('telefono'),
             "ref": order.get('ref')
         }
-        await collection_client.update_one(
-            {"correo_electronico": order.get('correo_electronico')},
-            {"$set": cliente_data},
-            upsert=True
-        )
 
+        if existing_client:
+            # Verifica si algún dato es diferente antes de actualizar
+            differences = {
+                key: value for key, value in cliente_data.items()
+                if existing_client.get(key) != value
+            }
+            if differences:
+                await collection_client.update_one(
+                    {"_id": existing_client["_id"]},
+                    {"$set": differences}
+                )
+        else:
+            # Si no existe, inserta un nuevo cliente
+            await collection_client.insert_one(cliente_data)
+
+        # Construir la lista de pedidos
         order_list.append(Order(
             cedula=order.get('cedula'),
             nombre=order.get('nombre'),
@@ -535,6 +551,7 @@ async def get_orders_by_ambassador(current_user: str = Depends(get_current_user)
         ))
 
     return order_list
+
     
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -800,8 +817,6 @@ class Order(BaseModel):
 # Endpoint para obtener los pedidos por cliente
 @app.get("/orders-by-client/{client_email}", response_model=List[Order])
 async def get_orders_by_client(client_email: str, current_user: str = Depends(get_current_user)):
-    
-
     """
     Endpoint protegido para obtener los pedidos de un cliente específico.
     Valida que el embajador autenticado sea el propietario del cliente.
@@ -817,7 +832,7 @@ async def get_orders_by_client(client_email: str, current_user: str = Depends(ge
 
         # Recuperar los pedidos del cliente
         orders_cursor = collection_pedidos.find({"correo_electronico": client_email})
-        orders = await orders_cursor.to_list(length=100)  # Limita la cantidad de pedidos a 100 (ajusta según necesidad)
+        orders = await orders_cursor.to_list(length=100)
 
         if not orders:
             raise HTTPException(
@@ -825,7 +840,6 @@ async def get_orders_by_client(client_email: str, current_user: str = Depends(ge
                 detail="No se encontraron pedidos para este cliente"
             )
 
-        # Procesar los pedidos para incluir información de la transacción
         order_list = []
         for order in orders:
             order_id = order.get('_id')
@@ -848,6 +862,37 @@ async def get_orders_by_client(client_email: str, current_user: str = Depends(ge
             }
             await collection_pedidos.update_one({"_id": order_id}, {"$set": updated_order})
 
+            # Combinar nombre y apellidos para el campo `nombre`
+            full_name = " ".join(filter(None, [order.get('nombre', '').strip(), order.get('apellidos', '').strip()]))
+
+            # Validar y guardar o actualizar el cliente en collection_client
+            cliente_data = {
+                "nombre": full_name,  # Aquí se guarda el nombre completo
+                "correo_electronico": order.get('correo_electronico'),
+                "telefono": order.get('telefono'),
+                "ref": order.get('ref')
+            }
+
+            existing_client = await collection_client.find_one(
+                {"correo_electronico": order.get('correo_electronico'), "telefono": order.get('telefono')}
+            )
+
+            if existing_client:
+                # Verificar diferencias, incluyendo la actualización del nombre completo
+                differences = {
+                    key: value for key, value in cliente_data.items()
+                    if existing_client.get(key) != value
+                }
+                if differences:
+                    await collection_client.update_one(
+                        {"_id": existing_client["_id"]},
+                        {"$set": differences}
+                    )
+            else:
+                # Si no existe, inserta el cliente con nombre completo
+                await collection_client.insert_one(cliente_data)
+
+            # Construir la lista de pedidos
             order_list.append(Order(
                 cedula=order.get('cedula'),
                 nombre=order.get('nombre'),
@@ -874,7 +919,6 @@ async def get_orders_by_client(client_email: str, current_user: str = Depends(ge
             status_code=500,
             detail="Error al obtener los pedidos del cliente"
         ) from e
-        
 
 class ApprovedOrderResponse(BaseModel):
     status: str
