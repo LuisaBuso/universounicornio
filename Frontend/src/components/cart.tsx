@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { BsBag } from "react-icons/bs";
 
 const Cart = () => {
-  const { items, getTotalPrice, clearCart, removeItem, updateQuantity } = useCart();
+  const { items, getTotalPrice, removeItem, updateQuantity } = useCart();
   const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -15,7 +15,6 @@ const Cart = () => {
 
   const totalQuantity = items.reduce((acc, item) => acc + item.quantity, 0);
 
-  // Efecto para abrir automáticamente la bolsa cuando se agrega un producto
   useEffect(() => {
     if (items.length > 0) {
       setIsOpen(true);
@@ -51,7 +50,7 @@ const Cart = () => {
       </button>
 
       <div className={`cart-overlay ${isOpen ? "open" : ""}`}>
-        <div className="cart-content">
+        <div className="cart-content w-96 max-h-[80vh] overflow-y-auto p-4 bg-white rounded-lg shadow-lg">
           <button
             className="absolute top-2 right-2 text-gray-700 hover:text-gray-900 text-xl"
             onClick={toggleCart}
@@ -72,34 +71,34 @@ const Cart = () => {
                       <img
                         src={item.image}
                         alt={item.name}
-                        className="w-16 h-16 object-contain"
+                        className="w-12 h-12 object-contain"
                       />
                       <div>
-                        <h4 className="font-semibold">{item.name}</h4>
-                        <p className="text-sm text-gray-500">
+                        <h4 className="font-semibold text-sm">{item.name}</h4>
+                        <p className="text-xs text-gray-500">
                           Cantidad: {item.quantity}
                         </p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold">
+                      <p className="font-semibold text-sm">
                         MXN{item.price * item.quantity}
                       </p>
                       <div className="flex space-x-2 mt-2">
                         <button
-                          className="bg-[#F198C0] text-white px-2 py-1 text-sm rounded-md hover:bg-[#e87ca9]"
+                          className="bg-[#F198C0] text-white px-2 py-1 text-xs rounded-md hover:bg-[#e87ca9]"
                           onClick={() => updateQuantity(item.id, item.quantity + 1)}
                         >
                           +
                         </button>
                         <button
-                          className="bg-[#F198C0] text-white px-2 py-1 text-sm rounded-md hover:bg-[#e87ca9]"
+                          className="bg-[#F198C0] text-white px-2 py-1 text-xs rounded-md hover:bg-[#e87ca9]"
                           onClick={() => updateQuantity(item.id, item.quantity - 1)}
                         >
                           -
                         </button>
                         <button
-                          className="text-[#F198C0] text-sm hover:underline"
+                          className="text-[#F198C0] text-xs hover:underline"
                           onClick={() => removeItem(item.id)}
                         >
                           Eliminar
@@ -119,13 +118,13 @@ const Cart = () => {
                     className="w-full bg-[#F198C0] text-white py-2 rounded-md hover:bg-[#e87ca9]"
                     onClick={handleCheckout}
                   >
-                    Comprar
+                    Pagar
                   </button>
                   <button
                     className="w-full bg-[#F198C0] text-white py-2 rounded-md hover:bg-[#e87ca9]"
-                    onClick={clearCart}
+                    onClick={toggleCart} // Cambia la función para cerrar la modal
                   >
-                    Vaciar bolsa
+                    Seguir comprando
                   </button>
                 </div>
               </div>
