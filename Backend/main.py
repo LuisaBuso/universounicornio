@@ -174,6 +174,9 @@ async def get_user_profile(current_user: str = Depends(get_current_user)):
 
     return profile_data  # Devuelve los datos directamente
 
+
+
+
 @app.get("/clients", response_model=List[ClientData])
 async def get_clients(current_user: str = Depends(get_current_user)):
     """
@@ -185,8 +188,8 @@ async def get_clients(current_user: str = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Embajador no encontrado")
 
     # Obtener todos los clientes asociados al email del embajador
-    clients_cursor = collection_client.find({"ref": current_user})  # Cambiado a "ref" para coincidir con el campo usado en el endpoint anterior
-    clients = await clients_cursor.to_list(length=100)  # Limita la cantidad de clientes a 100 (ajusta según necesidad)
+    clients_cursor = collection_client.find({"ref": current_user})
+    clients = await clients_cursor.to_list(length=100)
 
     if not clients:
         raise HTTPException(status_code=404, detail="No hay clientes disponibles")
@@ -466,107 +469,99 @@ class Order(BaseModel):
     date_created: Optional[datetime] = None
     transaction_id: Optional[str] = None
 
-@app.get("/orders-by-client/{client_email}", response_model=List[Order])
-async def get_orders_by_client(client_email: str, current_user: str = Depends(get_current_user)):
-    """
-    Endpoint protegido para obtener los pedidos de un cliente específico.
-    Valida que el embajador autenticado sea el propietario del cliente.
-    Solo retorna los pedidos con estado "approved".
-    """
-    try:
-        # Verificar si el cliente pertenece al embajador autenticado
-        client = await collection_client.find_one({"correo_electronico": client_email, "ref": current_user})
-        if not client:
-            raise HTTPException(
-                status_code=404,
-                detail="Cliente no encontrado o no pertenece al embajador autenticado"
-            )
+@app.get("/orders-by-ambassador", response_model=List[Order])
+async def get_orders_by_ambassador(current_user: str = Depends(get_current_user)):
+    # Busca el embajador usando el correo actual
+    ambassador = await collection.find_one({"email": current_user})
+    
+    if not ambassador:
+        raise HTTPException(status_code=404, detail="Embajador no encontrado")
+    
+    # Recupera los pedidos donde el campo 'ref' coincide con el correo del embajador
+    orders_cursor = collection_pedidos.find({"ref": current_user})
+    orders = await orders_cursor.to_list(length=100)
+    
+    if not orders:
+        raise HTTPException(status_code=404, detail="No se encontraron pedidos para este embajador")
 
-        # Recuperar los pedidos del cliente
-        orders_cursor = collection_pedidos.find({"correo_electronico": client_email})
-        orders = await orders_cursor.to_list(length=100)
+    order_list = []
+    for order in orders:
+        order_id = order.get('_id')
+        transaction = await collection_transaction.find_one({"external_reference": str(order_id)})
 
-        if not orders:
-            raise HTTPException(
-                status_code=404,
-                detail="No se encontraron pedidos para este cliente"
-            )
+        if transaction:
+            status = transaction.get('status')
+            date_created = transaction.get('date_created')
+            transaction_id = str(transaction.get('id'))
+        else:
+            status = None
+            date_created = None
+            transaction_id = None
 
-        order_list = []
-        for order in orders:
-            order_id = order.get('_id')
-            transaction = await collection_transaction.find_one({"external_reference": str(order_id)})
+        updated_order = {
+            **order,
+            "status": status,
+            "date_created": date_created,
+            "transaction_id": transaction_id
+        }
+        await collection_pedidos.update_one({"_id": order_id}, {"$set": updated_order})
 
-            if transaction:
-                status = transaction.get('status')
-                date_created = transaction.get('date_created')
-                transaction_id = str(transaction.get('id'))
-            else:
-                status = None
-                date_created = None
-                transaction_id = None
-
-            # Solo agregar el pedido si el estado es "approved"
-            if status != "approved":
-                continue
-
-            # Combinar nombre y apellidos para el campo `nombre`
-            full_name = " ".join(filter(None, [order.get('nombre', '').strip(), order.get('apellidos', '').strip()]))
-
-            # Validar y guardar o actualizar el cliente en collection_client
-            cliente_data = {
-                "nombre": full_name,  # Aquí se guarda el nombre completo
-                "correo_electronico": order.get('correo_electronico'),
-                "telefono": order.get('telefono'),
-                "ref": order.get('ref')
+        # Validar si ya existe un cliente con el mismo correo o teléfono
+        existing_client = await collection_client.find_one(
+            {
+                "$or": [
+                    {"correo_electronico": order.get('correo_electronico')},
+                    {"telefono": order.get('telefono')}
+                ]
             }
+        )
 
-            existing_client = await collection_client.find_one(
-                {"correo_electronico": order.get('correo_electronico'), "telefono": order.get('telefono')}
-            )
+        # Combinar nombre y apellidos para el campo `nombre`
+        full_name = " ".join(filter(None, [order.get('nombre', '').strip(), order.get('apellidos', '').strip()]))
 
-            if existing_client:
-                # Verificar diferencias, incluyendo la actualización del nombre completo
-                differences = {
-                    key: value for key, value in cliente_data.items()
-                    if existing_client.get(key) != value
-                }
-                if differences:
-                    await collection_client.update_one(
-                        {"_id": existing_client["_id"]},
-                        {"$set": differences}
-                    )
-            else:
-                # Si no existe, inserta el cliente con nombre completo
-                await collection_client.insert_one(cliente_data)
+        cliente_data = {
+            "nombre": full_name,  # Aquí se guarda el nombre completo
+            "correo_electronico": order.get('correo_electronico'),
+            "telefono": order.get('telefono'),
+            "ref": order.get('ref')
+        }
 
-            # Construir la lista de pedidos
-            order_list.append(Order(
-                cedula=order.get('cedula'),
-                nombre=order.get('nombre'),
-                apellidos=order.get('apellidos'),
-                pais_region=order.get('pais_region'),
-                direccion_calle=order.get('direccion_calle'),
-                numero_casa=order.get('numero_casa'),
-                estado_municipio=order.get('estado_municipio'),
-                localidad_ciudad=order.get('localidad_ciudad'),
-                telefono=order.get('telefono'),
-                correo_electronico=order.get('correo_electronico'),
-                ref=order.get('ref'),
-                productos=[ProductItem(**item) for item in order.get('productos', [])],
-                total=order.get('total'),
-                status=status,
-                date_created=date_created,
-                transaction_id=transaction_id
-            ))
+        if existing_client:
+            # Verifica si algún dato es diferente antes de actualizar
+            differences = {
+                key: value for key, value in cliente_data.items()
+                if existing_client.get(key) != value
+            }
+            if differences:
+                await collection_client.update_one(
+                    {"_id": existing_client["_id"]},
+                    {"$set": differences}
+                )
+        else:
+            # Si no existe, inserta un nuevo cliente
+            await collection_client.insert_one(cliente_data)
 
-        return order_list
+        # Construir la lista de pedidos
+        order_list.append(Order(
+            cedula=order.get('cedula'),
+            nombre=order.get('nombre'),
+            apellidos=order.get('apellidos'),
+            pais_region=order.get('pais_region'),
+            direccion_calle=order.get('direccion_calle'),
+            numero_casa=order.get('numero_casa'),
+            estado_municipio=order.get('estado_municipio'),
+            localidad_ciudad=order.get('localidad_ciudad'),
+            telefono=order.get('telefono'),
+            correo_electronico=order.get('correo_electronico'),
+            ref=order.get('ref'),
+            productos=[ProductItem(**item) for item in order.get('productos', [])],
+            total=order.get('total'),
+            status=status,
+            date_created=date_created,
+            transaction_id=transaction_id
+        ))
 
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail="Error al obtener los pedidos del cliente"
-        ) from e
+    return order_list
 
     
 @app.post("/webhook")
@@ -728,17 +723,8 @@ async def get_dashboard_metrics(current_user: str = Depends(get_current_user)):
     # Obtener el correo electrónico del embajador que inició sesión
     embajador_email = current_user
 
-    # Obtener todos los correos electrónicos únicos de clientes que tienen pedidos asociados con el embajador
-    total_clientes_con_pedido = await collection_pedidos.distinct("correo_electronico", {"ref": embajador_email})
-
-    # Total de clientes que tienen al menos un pedido asociado con el embajador
-    total_clientes_con_pedido_count = len(total_clientes_con_pedido)
-
-    # Total de contactos que no tienen un pedido afiliado con el embajador
-    total_contactos_sin_pedido = await collection_client.count_documents({
-        "correo_electronico": {"$nin": total_clientes_con_pedido},
-        "ref": embajador_email
-    })
+    # Total de clientes asociados con el embajador independientemente de si tienen un pedido o no
+    total_clientes = await collection_client.count_documents({"ref": embajador_email})
 
     # Ventas totales de pedidos asociados con el embajador y que tienen el status "approved"
     ventas_totales_cursor = collection_pedidos.aggregate([
@@ -748,14 +734,9 @@ async def get_dashboard_metrics(current_user: str = Depends(get_current_user)):
     ventas_totales_result = await ventas_totales_cursor.to_list(length=1)
     ventas_totales = ventas_totales_result[0]["total"] if ventas_totales_result else 0
 
-    # Total de clientes asociados con el embajador independientemente de si tienen un pedido o no
-    total_clientes = await collection_client.count_documents({"ref": embajador_email})
-
     return {
-        "total_clientes_con_pedido": total_clientes_con_pedido_count,
-        "total_contactos_sin_pedido": total_contactos_sin_pedido,
-        "ventas_totales_approved": ventas_totales,  # Cambiado a "ventas_totales_approved" para reflejar que son solo las ventas aprobadas
-        "total_clientes": total_clientes
+        "total_clientes": total_clientes,
+        "ventas_totales_approved": ventas_totales
     }
     
 class WalletResponse(BaseModel):
@@ -835,6 +816,7 @@ class Order(BaseModel):
 async def get_orders_by_client(client_email: str, current_user: str = Depends(get_current_user)):
     """
     Endpoint protegido para obtener los pedidos de un cliente específico.
+    Solo devuelve los pedidos con estado 'approved'.
     Valida que el embajador autenticado sea el propietario del cliente.
     """
     try:
@@ -846,69 +828,22 @@ async def get_orders_by_client(client_email: str, current_user: str = Depends(ge
                 detail="Cliente no encontrado o no pertenece al embajador autenticado"
             )
 
-        # Recuperar los pedidos del cliente
-        orders_cursor = collection_pedidos.find({"correo_electronico": client_email})
+        # Recuperar los pedidos del cliente con estado 'approved'
+        orders_cursor = collection_pedidos.find({
+            "correo_electronico": client_email,
+            "status": "approved"  # Filtrar por pedidos con estado 'approved'
+        })
         orders = await orders_cursor.to_list(length=100)
 
         if not orders:
             raise HTTPException(
                 status_code=404,
-                detail="No se encontraron pedidos para este cliente"
+                detail="No se encontraron pedidos aprobados para este cliente"
             )
 
+        # Construir la lista de pedidos
         order_list = []
         for order in orders:
-            order_id = order.get('_id')
-            transaction = await collection_transaction.find_one({"external_reference": str(order_id)})
-
-            if transaction:
-                status = transaction.get('status')
-                date_created = transaction.get('date_created')
-                transaction_id = str(transaction.get('id'))
-            else:
-                status = None
-                date_created = None
-                transaction_id = None
-
-            updated_order = {
-                **order,
-                "status": status,
-                "date_created": date_created,
-                "transaction_id": transaction_id
-            }
-            await collection_pedidos.update_one({"_id": order_id}, {"$set": updated_order})
-
-            # Combinar nombre y apellidos para el campo `nombre`
-            full_name = " ".join(filter(None, [order.get('nombre', '').strip(), order.get('apellidos', '').strip()]))
-
-            # Validar y guardar o actualizar el cliente en collection_client
-            cliente_data = {
-                "nombre": full_name,  # Aquí se guarda el nombre completo
-                "correo_electronico": order.get('correo_electronico'),
-                "telefono": order.get('telefono'),
-                "ref": order.get('ref')
-            }
-
-            existing_client = await collection_client.find_one(
-                {"correo_electronico": order.get('correo_electronico'), "telefono": order.get('telefono')}
-            )
-
-            if existing_client:
-                # Verificar diferencias, incluyendo la actualización del nombre completo
-                differences = {
-                    key: value for key, value in cliente_data.items()
-                    if existing_client.get(key) != value
-                }
-                if differences:
-                    await collection_client.update_one(
-                        {"_id": existing_client["_id"]},
-                        {"$set": differences}
-                    )
-            else:
-                # Si no existe, inserta el cliente con nombre completo
-                await collection_client.insert_one(cliente_data)
-
-            # Construir la lista de pedidos
             order_list.append(Order(
                 cedula=order.get('cedula'),
                 nombre=order.get('nombre'),
@@ -923,9 +858,9 @@ async def get_orders_by_client(client_email: str, current_user: str = Depends(ge
                 ref=order.get('ref'),
                 productos=[ProductItem(**item) for item in order.get('productos', [])],
                 total=order.get('total'),
-                status=status,
-                date_created=date_created,
-                transaction_id=transaction_id
+                status=order.get('status'),
+                date_created=order.get('date_created'),
+                transaction_id=order.get('transaction_id')
             ))
 
         return order_list
@@ -933,8 +868,8 @@ async def get_orders_by_client(client_email: str, current_user: str = Depends(ge
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail="Error al obtener los pedidos del cliente"
-        ) from e
+            detail=f"Error interno del servidor: {str(e)}"
+        )
 
 class ApprovedOrderResponse(BaseModel):
     status: str
