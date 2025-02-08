@@ -50,6 +50,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 # Configuración de CORS
 origins = [
     "https://rizosfelicesmx.unicornio.tech",
+    "https://rizosfelicesco.unicornio.tech"
     "http://localhost:3000",
 ]
 
