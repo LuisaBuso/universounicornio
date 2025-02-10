@@ -41,8 +41,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # Configuración de CORS
 origins = [
+    "https://rizosfelicesco.unicornio.tech",
     "https://rizosfelicesmx.unicornio.tech",
-    "http://localhost:3000",
+    "http://localhost:3000"
 ]
 
 app.add_middleware(
