@@ -40,9 +40,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // Guardar carrito en localStorage cuando cambie
-  useEffect(() => {
-    localStorage.setItem('cart', JSON.stringify(items));
-  }, [items]);
+
 
   const addItem = (product: Product) => {
     setItems((currentItems) => {

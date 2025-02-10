@@ -18,7 +18,7 @@ export default function ProductsPage() {
 
     // Verificar si el token de acceso existe en localStorage
     const token = localStorage.getItem('access_token');
-    
+
     // Si no existe el token, redirigir al usuario a la página de login
     if (!token) {
       navigate('/'); // Redirige al inicio (login)
@@ -28,16 +28,19 @@ export default function ProductsPage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Productos</h1>
-        <Button onClick={() => setIsShareDialogOpen(true)}>
-          <Share2 className="mr-2 h-4 w-4" />
-          Compartir Catálogo
+        <h1 className="text-3xl font-bold mr-4">Productos</h1> {/* Añadido mr-4 para separar el título del botón */}
+        <Button
+          onClick={() => setIsShareDialogOpen(true)}
+          className="text-xs px-2 py-1 flex items-center justify-center space-x-2" // Ajustado el padding y el tamaño del texto
+        >
+          <Share2 className="mr-2 h-3 w-3" /> {/* Icono más pequeño */}
+          <span>Compartir Catálogo</span>
         </Button>
       </div>
       <ProductList />
-      <ShareCatalogDialog 
-        isOpen={isShareDialogOpen} 
-        onClose={() => setIsShareDialogOpen(false)} 
+      <ShareCatalogDialog
+        isOpen={isShareDialogOpen}
+        onClose={() => setIsShareDialogOpen(false)}
       />
     </div>
   );
