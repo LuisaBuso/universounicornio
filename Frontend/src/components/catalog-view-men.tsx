@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import AcondicionadorMen from "../assets/CONDITIONER MEN.png";
@@ -16,7 +17,13 @@ interface Product {
   description: string;
   price: number;
   image: string;
+  currency?: string;
 }
+
+// Función para formatear el precio
+const formatPrice = (price: number) => {
+  return price.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+};
 
 const DarkCatalog = () => {
   const { addItem } = useCart();
@@ -24,36 +31,66 @@ const DarkCatalog = () => {
   const queryParams = new URLSearchParams(location.search);
   const ref = queryParams.get('ref');
 
-  const products: Product[] = [
-    {
-      id: 6,
-      name: "Acondicionador Men",
-      description: "shine & softness",
-      price: 507, // Precio fijo en MXN
-      image: AcondicionadorMen,
-    },
-    {
-      id: 7,
-      name: "Shampoo Special Men",
-      description: "cleaning & freshness",
-      price: 507, // Precio fijo en MXN
-      image: ShampooMen,
-    },
-    {
-      id: 8,
-      name: "Cream 3 in 1 Men",
-      description: "repair & define",
-      price: 507, // Precio fijo en MXN
-      image: crema3en1Men,
-    },
-    {
-      id: 9,
-      name: "Gel Men",
-      description: "shine & hold",
-      price: 507, // Precio fijo en MXN
-      image: GelMen,
-    },
-  ];
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchCountry = async () => {
+      if (ref) {
+        try {
+          const response = await fetch(`https://api.unicornio.tech/api/pais?ref=${encodeURIComponent(ref)}`);
+          const data = await response.json();
+          const country = data.pais;
+
+          // Ajustar precios según el país
+          const adjustedProducts = [
+            {
+              id: 6,
+              name: "Acondicionador Men",
+              description: "shine & softness",
+              price: country === "Colombia" ? 77350 : 507,
+              image: AcondicionadorMen,
+              currency: country === "Colombia" ? "COP" : "MXN",
+            },
+            {
+              id: 7,
+              name: "Shampoo Special Men",
+              description: "cleaning & freshness",
+              price: country === "Colombia" ? 77350 : 507,
+              image: ShampooMen,
+              currency: country === "Colombia" ? "COP" : "MXN",
+            },
+            {
+              id: 8,
+              name: "Cream 3 in 1 Men",
+              description: "repair & define",
+              price: country === "Colombia" ? 77350 : 507,
+              image: crema3en1Men,
+              currency: country === "Colombia" ? "COP" : "MXN",
+            },
+            {
+              id: 9,
+              name: "Gel Men",
+              description: "shine & hold",
+              price: country === "Colombia" ? 59400 : 507,
+              image: GelMen,
+              currency: country === "Colombia" ? "COP" : "MXN",
+            },
+          ];
+
+          setProducts(adjustedProducts);
+        } catch (error) {
+          console.error("Error fetching country:", error);
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        setIsLoading(false);
+      }
+    };
+
+    fetchCountry();
+  }, [ref]);
 
   const handleAddToCart = (product: Product) => {
     console.log("Agregando al carrito:", product);
@@ -102,11 +139,12 @@ const DarkCatalog = () => {
                 <h3 className="font-medium text-sm text-center" style={{ color: '#BC995A' }}>{product.name}</h3>
                 <p className="text-xs text-center" style={{ color: '#BC995A' }}>{product.description}</p>
                 <div className="text-sm font-bold text-center" style={{ color: '#BC995A' }}>
-                  ${product.price.toFixed(2)} MXN {/* Precio formateado */}
+                  {isLoading ? "Cargando..." : `${formatPrice(product.price)} ${product.currency}`}
                 </div>
                 <Button
                   className="bg-black hover:bg-gray-800 text-white rounded-full px-4 py-1 text-xs w-full"
                   onClick={() => handleAddToCart(product)}
+                  disabled={isLoading}
                 >
                   Lo quiero
                 </Button>
@@ -125,18 +163,19 @@ const DarkCatalog = () => {
             />
             <div className="p-4 space-y-2 flex flex-col justify-between h-full">
               <img
-                src={products[2].image}
-                alt={products[2].name}
+                src={products[2]?.image}
+                alt={products[2]?.name}
                 className="w-full h-40 object-contain mx-auto"
               />
-              <h3 className="font-medium text-sm text-center" style={{ color: '#BC995A' }}>{products[2].name}</h3>
-              <p className="text-xs text-center" style={{ color: '#BC995A' }}>{products[2].description}</p>
+              <h3 className="font-medium text-sm text-center" style={{ color: '#BC995A' }}>{products[2]?.name}</h3>
+              <p className="text-xs text-center" style={{ color: '#BC995A' }}>{products[2]?.description}</p>
               <div className="text-sm font-bold text-center" style={{ color: '#BC995A' }}>
-                ${products[2].price.toFixed(2)} MXN {/* Precio formateado */}
+                {isLoading ? "Cargando..." : `${formatPrice(products[2]?.price)} ${products[2]?.currency}`}
               </div>
               <Button
                 className="bg-black hover:bg-gray-800 text-white rounded-full px-4 py-1 text-xs w-full"
                 onClick={() => handleAddToCart(products[2])}
+                disabled={isLoading}
               >
                 Lo quiero
               </Button>
@@ -148,18 +187,19 @@ const DarkCatalog = () => {
           <div className="grid grid-cols-2 gap-4">
             <div className="p-4 space-y-2 flex flex-col justify-between h-full">
               <img
-                src={products[3].image}
-                alt={products[3].name}
+                src={products[3]?.image}
+                alt={products[3]?.name}
                 className="w-full h-40 object-contain mx-auto"
               />
-              <h3 className="font-medium text-sm text-center" style={{ color: '#BC995A' }}>{products[3].name}</h3>
-              <p className="text-xs text-center" style={{ color: '#BC995A' }}>{products[3].description}</p>
+              <h3 className="font-medium text-sm text-center" style={{ color: '#BC995A' }}>{products[3]?.name}</h3>
+              <p className="text-xs text-center" style={{ color: '#BC995A' }}>{products[3]?.description}</p>
               <div className="text-sm font-bold text-center" style={{ color: '#BC995A' }}>
-                ${products[3].price.toFixed(2)} MXN {/* Precio formateado */}
+                {isLoading ? "Cargando..." : `${formatPrice(products[3]?.price)} ${products[3]?.currency}`}
               </div>
               <Button
                 className="bg-black hover:bg-gray-800 text-white rounded-full px-4 py-1 text-xs w-full"
                 onClick={() => handleAddToCart(products[3])}
+                disabled={isLoading}
               >
                 Lo quiero
               </Button>
@@ -201,7 +241,7 @@ const DarkCatalog = () => {
                     <h3 className="font-medium text-lg" style={{ color: '#BC995A' }}>{product.name}</h3>
                     <p className="text-sm text-gray-600">{product.description}</p>
                     <div className="text-lg font-bold" style={{ color: '#BC995A' }}>
-                      ${product.price.toFixed(2)} MXN {/* Precio formateado */}
+                      {isLoading ? "Cargando..." : `${formatPrice(product.price)} ${product.currency}`}
                     </div>
                   </div>
 
@@ -209,6 +249,7 @@ const DarkCatalog = () => {
                   <Button
                     className="w-full bg-black hover:bg-gray-800 text-white rounded-full py-2 text-sm mt-4"
                     onClick={() => handleAddToCart(product)}
+                    disabled={isLoading}
                   >
                     Lo quiero
                   </Button>
@@ -220,6 +261,6 @@ const DarkCatalog = () => {
       </div>
     </div>
   );
-}
+};
 
 export default DarkCatalog;

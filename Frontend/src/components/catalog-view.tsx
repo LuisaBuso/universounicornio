@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
-import { Link, useLocation } from "react-router-dom"; // Importar useLocation
+import { Link, useLocation } from "react-router-dom";
 import logoRSF from "../assets/logoRFS.png";
 import prePro from "../assets/Rectangle 48.png";
 import product1Img from "../assets/Acondicionador.png";
@@ -18,10 +19,11 @@ interface Product {
   price: number;
   image: string;
   category: string;
+  currency?: string;
 }
 
-// Lista de productos con precios ajustados
-const products: Product[] = [
+// Lista de productos con precios base en MXN
+const baseProducts: Product[] = [
   { id: 1, name: "Acondicionador", description: "shine & softness", price: 507.00, image: product1Img, category: "Lavado" },
   { id: 2, name: "Shampoo", description: "cleaning & freshness", price: 507.00, image: product2Img, category: "Lavado" },
   { id: 3, name: "Aceite", description: "pre lavado", price: 427.00, image: product3Img, category: "Tratamiento" },
@@ -29,10 +31,14 @@ const products: Product[] = [
   { id: 5, name: "Gel", description: "shine & hold", price: 507.00, image: product5Img, category: "Definición" },
 ];
 
+// Función para formatear el precio
+const formatPrice = (price: number) => {
+  return price.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+};
+
 // Componente ProductCard
-const ProductCard = ({ product, onAddToCart, isDesktop = false }: { product: Product; onAddToCart: (product: Product) => void; isDesktop?: boolean }) => {
-  // Formatear el precio con dos decimales y agregar "MXN"
-  const formattedPrice = `${product.price.toFixed(2)} MXN`;
+const ProductCard = ({ product, onAddToCart, isDesktop = false, isLoading = false }: { product: Product; onAddToCart: (product: Product) => void; isDesktop?: boolean; isLoading?: boolean }) => {
+  const formattedPrice = isLoading ? "Cargando..." : `${formatPrice(product.price)} ${product.currency || "MXN"}`;
 
   return (
     <div className={`flex flex-col items-center space-y-3 border p-4 rounded-lg shadow-sm ${isDesktop ? "hover:shadow-md" : ""}`}>
@@ -47,11 +53,12 @@ const ProductCard = ({ product, onAddToCart, isDesktop = false }: { product: Pro
       </div>
       <div className="flex justify-between items-center w-full mt-8">
         <span className={`${isDesktop ? "text-lg" : "text-sm"} font-semibold`} style={{ color: '#F198C0' }}>
-          {formattedPrice} {/* Precio formateado con "MXN" */}
+          {formattedPrice}
         </span>
         <Button
           className="bg-[#F198C0] hover:bg-[#E87FAF] text-white px-4 py-1 rounded-full text-xs lg:px-6 lg:py-2 lg:text-sm"
           onClick={() => onAddToCart(product)}
+          disabled={isLoading}
         >
           Lo quiero
         </Button>
@@ -61,13 +68,13 @@ const ProductCard = ({ product, onAddToCart, isDesktop = false }: { product: Pro
 };
 
 // Componente ProductSection
-const ProductSection = ({ title, products, onAddToCart }: { title: string; products: Product[]; onAddToCart: (product: Product) => void }) => {
+const ProductSection = ({ title, products, onAddToCart, isLoading }: { title: string; products: Product[]; onAddToCart: (product: Product) => void; isLoading: boolean }) => {
   return (
     <div className="mb-6">
       <h2 className="text-lg font-semibold mb-4" style={{ color: '#F198C0' }}>{title}</h2>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
         {products.map((product) => (
-          <ProductCard key={product.id} product={product} onAddToCart={onAddToCart} />
+          <ProductCard key={product.id} product={product} onAddToCart={onAddToCart} isLoading={isLoading} />
         ))}
       </div>
     </div>
@@ -95,20 +102,59 @@ const PreProSection = () => {
 // Componente EcommercePage
 const EcommercePage = () => {
   const { addItem } = useCart();
-
-  // Obtener la ubicación actual (URL)
   const location = useLocation();
-
-  // Extraer el parámetro "ref" de la URL actual
   const searchParams = new URLSearchParams(location.search);
-  const ref = searchParams.get("ref"); // Obtener el valor de "ref"
+  const ref = searchParams.get("ref");
 
-  // Generar el enlace al catálogo con el parámetro ref (si existe)
-  const catalogLink = ref ? `/catalog-view-men?ref=${encodeURIComponent(ref)}` : "/catalog";
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchCountry = async () => {
+      if (ref) {
+        try {
+          const response = await fetch(`https://api.unicornio.tech/api/pais?ref=${encodeURIComponent(ref)}`);
+          const data = await response.json();
+          const country = data.pais;
+
+          // Ajustar precios según el país
+          const adjustedProducts = baseProducts.map(product => {
+            let adjustedPrice = product.price;
+            let currency = "MXN"; // Moneda por defecto
+
+            if (country === "Colombia") {
+              // Precios fijos en COP
+              adjustedPrice = 77350; // Precio fijo para todos los productos
+              currency = "COP";
+
+              // Precio especial para el Aceite
+              if (product.id === 3) {
+                adjustedPrice = 59400; // Precio fijo para el Aceite
+              }
+            }
+
+            return { ...product, price: adjustedPrice, currency };
+          });
+
+          setProducts(adjustedProducts);
+        } catch (error) {
+          console.error("Error fetching country:", error);
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        setIsLoading(false);
+      }
+    };
+
+    fetchCountry();
+  }, [ref]);
 
   const handleAddToCart = (product: Product) => {
     addItem(product);
   };
+
+  const catalogLink = ref ? `/catalog-view-men?ref=${encodeURIComponent(ref)}` : "/catalog";
 
   return (
     <div className="bg-gray-50 min-h-screen pb-16">
@@ -132,6 +178,7 @@ const EcommercePage = () => {
           title="Lavado"
           products={products.filter((p) => p.category === "Lavado")}
           onAddToCart={handleAddToCart}
+          isLoading={isLoading}
         />
         <div className="mb-6">
           <h2 className="text-lg font-semibold mb-4" style={{ color: '#F198C0' }}>Tratamiento</h2>
@@ -140,7 +187,7 @@ const EcommercePage = () => {
             {products
               .filter((p) => p.category === "Tratamiento")
               .map((product) => (
-                <ProductCard key={product.id} product={product} onAddToCart={handleAddToCart} />
+                <ProductCard key={product.id} product={product} onAddToCart={handleAddToCart} isLoading={isLoading} />
               ))}
           </div>
         </div>
@@ -148,6 +195,7 @@ const EcommercePage = () => {
           title="Definición"
           products={products.filter((p) => p.category === "Definición")}
           onAddToCart={handleAddToCart}
+          isLoading={isLoading}
         />
       </div>
 
@@ -156,7 +204,7 @@ const EcommercePage = () => {
         <h2 className="text-2xl font-bold mb-6" style={{ color: '#F198C0' }}>Linea Special</h2>
         <div className="grid grid-cols-3 gap-8">
           {products.map((product) => (
-            <ProductCard key={product.id} product={product} onAddToCart={handleAddToCart} isDesktop />
+            <ProductCard key={product.id} product={product} onAddToCart={handleAddToCart} isDesktop isLoading={isLoading} />
           ))}
         </div>
       </div>

@@ -6,8 +6,11 @@ import { BsBag } from "react-icons/bs";
 const Cart = () => {
   const { items, getTotalPrice, removeItem, updateQuantity } = useCart();
   const [isOpen, setIsOpen] = useState(false);
+  const [currency, setCurrency] = useState("MXN"); // Moneda por defecto
   const navigate = useNavigate();
   const location = useLocation();
+  const queryParams = new URLSearchParams(location.search || "");
+  const ref = queryParams.get("ref");
 
   const toggleCart = () => {
     setIsOpen(!isOpen);
@@ -21,9 +24,31 @@ const Cart = () => {
     }
   }, [items]);
 
+  // Obtener el país y ajustar la moneda
+  useEffect(() => {
+    const fetchCountry = async () => {
+      if (ref) {
+        try {
+          const response = await fetch(`https://api.unicornio.tech/api/pais?ref=${encodeURIComponent(ref)}`);
+          const data = await response.json();
+          const country = data.pais;
+
+          // Ajustar la moneda según el país
+          if (country === "Colombia") {
+            setCurrency("COP");
+          } else {
+            setCurrency("MXN");
+          }
+        } catch (error) {
+          console.error("Error fetching country:", error);
+        }
+      }
+    };
+
+    fetchCountry();
+  }, [ref]);
+
   const handleCheckout = () => {
-    const queryParams = new URLSearchParams(location.search || "");
-    const ref = queryParams.get("ref");
     const checkoutUrl = `/checkout${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`;
     navigate(checkoutUrl, {
       state: {
@@ -31,6 +56,11 @@ const Cart = () => {
         totalPrice: getTotalPrice(),
       },
     });
+  };
+
+  // Función para formatear el precio
+  const formatPrice = (price: number) => {
+    return price.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   };
 
   return (
@@ -82,7 +112,7 @@ const Cart = () => {
                     </div>
                     <div className="text-right">
                       <p className="font-semibold text-sm">
-                        MXN{item.price * item.quantity}
+                        {currency} {formatPrice(item.price * item.quantity)}
                       </p>
                       <div className="flex space-x-2 mt-2">
                         <button
@@ -111,7 +141,7 @@ const Cart = () => {
 
               <div className="mt-4">
                 <h4 className="font-bold text-lg">
-                  Total: MXN {getTotalPrice().toLocaleString()}
+                  Total: {currency} {formatPrice(getTotalPrice())}
                 </h4>
                 <div className="mt-4 flex space-x-2">
                   <button
@@ -122,7 +152,7 @@ const Cart = () => {
                   </button>
                   <button
                     className="w-full bg-[#F198C0] text-white py-2 rounded-md hover:bg-[#e87ca9]"
-                    onClick={toggleCart} // Cambia la función para cerrar la modal
+                    onClick={toggleCart}
                   >
                     Seguir comprando
                   </button>
