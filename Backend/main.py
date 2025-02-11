@@ -1,34 +1,27 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Form, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
-from jwt.exceptions import InvalidTokenError
 from fastapi.responses import JSONResponse
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from jose import JWTError
-from schemas import TokenResponse, UserCreate, UserProfile, ClientData, UserInfo, PreferenceRequest
-from pydantic import BaseModel
+from schemas import (
+    TokenResponse, UserCreate, UserProfile, ClientData, 
+    PreferenceRequest, ProductItem, PedidoMongo, 
+    ClientCreate, Order, ApprovedOrderResponse
+)
 from datetime import datetime, timedelta
-import httpx
 import mercadopago
 import jwt, requests
 from typing import List, Optional
 import os
-from bson import ObjectId
 from dotenv import load_dotenv
-
-# Base de datos simulada y funciones de verificación
-# Reemplazar con tus funciones de base de datos reales
+import urllib.parse
+# Importaciones de las colecciones desde database.py
 from database import (
-    collection,
-    collection_client,
-    collection_transaction,
-    collection_pedidos,
-    collection_wallet,
-    verify_password,
-    create_access_token,
-    SECRET_KEY,
-    ALGORITHM,
+    collection, collection_client, collection_transaction, 
+    collection_pedidos, collection_wallet, verify_password, 
+    create_access_token, SECRET_KEY, ALGORITHM
 )
 
 # Configuración de FastAPI
@@ -38,7 +31,6 @@ load_dotenv()
 
 PUBLIC_KEY = os.getenv("PUBLIC_KEY")
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
-print(ACCESS_TOKEN)
 MERCADO_PAGO_API_URL = "https://api.mercadopago.com/v1/payments"
 
 sdk = mercadopago.SDK(ACCESS_TOKEN)
@@ -86,8 +78,22 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 async def read_root():
     return {"message": "Bienvenido a la API de Embajadores"}
 
+@app.get("/api/pais")
+async def obtener_pais(ref: str = Query(..., description="Correo del embajador")):
+    # Decodificar el valor de ref para manejar caracteres como %40
+    ref_decoded = urllib.parse.unquote(ref).lower()  # Convertir a minúsculas
 
-# Endpoint para iniciar sesión
+    # Buscar embajador por email
+    embajador = await collection.find_one({"email": ref_decoded})
+    print("Conexión a Mongo válida:", collection.count_documents({}))
+
+    if not embajador:
+        raise HTTPException(status_code=404, detail="Embajador no encontrado")
+    
+    pais = embajador.get("pais", "País no definido")  # Manejo seguro
+    return {"id": str(embajador["_id"]), "email": embajador["email"], "pais": pais}
+
+# ENDPOINT PARA INICIAR SESION POR EMBAJADOR
 @app.post("/token", response_model=TokenResponse)
 async def login_user(
     username: str = Form(...),  # Swagger envía "username" en lugar de "email"
@@ -119,7 +125,7 @@ async def login_user(
         "token_type": "bearer"
     }
 
-# Endpoint para crear un usuario
+# ENDPOINT PARA CREAR UN NUEVO EMBAJADOR
 @app.post("/users/", status_code=201)
 async def create_user(user: UserCreate):
     # Verificar si el usuario ya existe por correo electrónico
@@ -146,18 +152,7 @@ async def create_user(user: UserCreate):
     # Devolver la respuesta con el ID del usuario y su email
     return {"id": str(result.inserted_id), "email": user.email, "pais": user.pais}
 
-# Ejemplo de una ruta protegida
-@app.get("/protected-route/")
-async def protected_route(current_user: str = Depends(get_current_user)):
-    return {"message": f"Acceso permitido para el usuario {current_user}"}
-
-# Endpoint para obtener el perfil de un usuario
-class UserProfile(BaseModel):
-    full_name: str
-    whatsapp_number: str
-    email: str
-    address: str
-
+# ENDPOINT PARA LOS DATOS DEL EMBAJADOR AUTENTICADO
 @app.get("/ambassadors", response_model=UserProfile)
 async def get_user_profile(current_user: str = Depends(get_current_user)):
     # Usa await para obtener el resultado de la consulta
@@ -175,9 +170,7 @@ async def get_user_profile(current_user: str = Depends(get_current_user)):
 
     return profile_data  # Devuelve los datos directamente
 
-
-
-
+# ENDPOINT PARA OBTENER LOS CLIENTES ASOCIADOS A UN EMBAJADOR
 @app.get("/clients", response_model=List[ClientData])
 async def get_clients(current_user: str = Depends(get_current_user)):
     """
@@ -207,14 +200,7 @@ async def get_clients(current_user: str = Depends(get_current_user)):
 
     return client_list
 
-class ClientCreate(BaseModel):
-    name: str
-    email: str
-    whatsapp_phone: str
-    instagram: Optional[str] = None
-    ref: str  # Referencia al embajador (correo del embajador)
-
-# Endpoint para guardar un cliente
+# ENDPOINT PARA CREAR UN CLIENTE ASOSIADO A UN EMBAJADOR
 @app.post("/clients", response_model=ClientCreate)
 async def create_client(client_data: ClientCreate, current_user: str = Depends(get_current_user)):
     """
@@ -247,45 +233,7 @@ async def create_client(client_data: ClientCreate, current_user: str = Depends(g
     # Devolver los datos del cliente guardado
     return {**client_data.dict(), "id": str(result.inserted_id)}
 
-class ProductItem(BaseModel):
-    title: str
-    quantity: int
-    unit_price: float
-
-# Modelo para la solicitud de preferencia (datos de envío + ítems)
-class PreferenceRequest(BaseModel):
-    cedula: str
-    nombre: str
-    apellidos: str
-    pais_region: str
-    direccion_calle: str
-    numero_casa: str
-    estado_municipio: str
-    localidad_ciudad: str
-    telefono: str
-    correo_electronico: str
-    ref: str
-    items: List[ProductItem]
-
-# Modelo para guardar los datos en MongoDB
-class PedidoMongo(BaseModel):
-    cedula: str
-    nombre: str
-    apellidos: str
-    pais_region: str
-    direccion_calle: str
-    numero_casa: str
-    estado_municipio: str
-    localidad_ciudad: str
-    telefono: str
-    correo_electronico: str
-    ref: str
-    productos: List[ProductItem]
-    total: float
-    status: Optional[str] = "pending"
-    date_created: Optional[str] = datetime.utcnow().isoformat()
-    transaction_id: Optional[str] = None
-
+# ENDPOINT PARA CREAR UN PEDIDO Y LA PREFERENCIA CON MERCADO PAGO
 @app.post("/create-preference")
 async def create_preference(request: PreferenceRequest):
     try:
@@ -356,7 +304,7 @@ async def create_preference(request: PreferenceRequest):
         print("Error al crear la preferencia:", str(e))
         raise HTTPException(status_code=422, detail=str(e))
 
-
+# ENDPOINT PARA TRAER TODOS LOS PAGOS HECHOS POR MEDIO DE MERCADO PAGO
 @app.get("/payments")
 async def get_all_payments(begin_date: str, end_date: str, limit: int = 50, offset: int = 0):
     """
@@ -408,68 +356,8 @@ async def get_all_payments(begin_date: str, end_date: str, limit: int = 50, offs
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
 
-@app.post("/shipping-information")
-async def create_shipping_info(user_info: UserInfo):
-    """
-    Crea información de envío y registra un cliente si no existe.
-    """
-    try:
-        # Verificar si el embajador existe
-        ambassador = await collection.find_one({"email": user_info.ref})
-        if not ambassador:
-            raise HTTPException(status_code=404, detail="Embajador no encontrado.")
-
-        # Verificar si el cliente ya existe en la base de datos
-        existing_client = await collection_client.find_one({"email": user_info.correo_electronico})
-        
-        if not existing_client:
-            # Crear un nuevo cliente asociado al embajador
-            new_client = {
-                "name": user_info.nombre + " " + user_info.apellidos,
-                "email": user_info.correo_electronico,
-                "whatsapp_phone": user_info.telefono,
-                "embajador_email": user_info.ref,
-            }
-            await collection_client.insert_one(new_client)
-
-        # Guardar la información de envío
-        user_data = user_info.dict()
-        await collection_pedidos.insert_one(user_data)
-
-        return {"message": "Información de envío y cliente guardados correctamente."}
-
-    except HTTPException as e:
-        raise e
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
-
-
-class ProductItem(BaseModel):
-    title: str
-    unit_price: float
-    quantity: int
-
-class Order(BaseModel):
-    cedula: str
-    nombre: str
-    apellidos: str
-    pais_region: str
-    direccion_calle: str
-    numero_casa: str
-    estado_municipio: str
-    localidad_ciudad: str
-    telefono: str
-    correo_electronico: str
-    ref: str
-    productos: List[ProductItem]
-    total: float
-    status: Optional[str] = None
-    date_created: Optional[datetime] = None
-    transaction_id: Optional[str] = None
-
+# ENDPOINT PARA TRAER LOS PEDIDOS DE LOS CLIENTES POR EMBAJADOR
 @app.get("/orders-by-ambassador", response_model=List[Order])
 async def get_orders_by_ambassador(current_user: str = Depends(get_current_user)):
     # Busca el embajador usando el correo actual
@@ -564,7 +452,7 @@ async def get_orders_by_ambassador(current_user: str = Depends(get_current_user)
 
     return order_list
 
-    
+# ENDPOINT PARA RECIBIR LAS RESPUESTAS DE LOS PEDIDOS QUE HAN REALIZADO POR MERCADO PAGO
 @app.post("/webhook")
 async def webhook(request: Request):
     """
@@ -624,7 +512,8 @@ async def webhook(request: Request):
     except Exception as e:
         print("Error procesando el webhook:", e)
         raise HTTPException(status_code=500, detail="Error procesando el webhook")
-    
+
+# ENDPOINT PARA CALCULAR LA COMISION DE UN EMBAJADOR
 @app.post("/calcular-comision", summary="Calcular comisión para el embajador autenticado")
 async def calcular_comision(current_user: str = Depends(get_current_user)):
     """
@@ -682,43 +571,7 @@ async def calcular_comision(current_user: str = Depends(get_current_user)):
             detail="Error al calcular la comisión"
         ) from e
 
-class ProductItem(BaseModel):
-    title: str
-    unit_price: float
-    quantity: int
-
-class Order(BaseModel):
-    cedula: str
-    nombre: str
-    apellidos: str
-    pais_region: str
-    direccion_calle: str
-    numero_casa: str
-    estado_municipio: str
-    localidad_ciudad: str
-    telefono: str
-    correo_electronico: str
-    ref: str
-    productos: List[ProductItem]
-    total: float
-    status: Optional[str] = None
-    date_created: Optional[datetime] = None
-    transaction_id: Optional[str] = None
-
-class ClientCreate(BaseModel):
-    name: str
-    email: str
-    whatsapp_phone: str
-    instagram: Optional[str] = None
-    ref: str  # Referencia al embajador (correo del embajador)
-
-class UserProfile(BaseModel):
-    full_name: str
-    whatsapp_number: str
-    email: str
-    address: str
-
-# Endpoint para obtener las métricas
+# ENDPOINT PARA OBTENER EL TOTAL DE CLIENTES Y DE VENTAS POR EMBAJADOR
 @app.get("/dashboard/metrics")
 async def get_dashboard_metrics(current_user: str = Depends(get_current_user)):
     # Obtener el correo electrónico del embajador que inició sesión
@@ -739,14 +592,8 @@ async def get_dashboard_metrics(current_user: str = Depends(get_current_user)):
         "total_clientes": total_clientes,
         "ventas_totales_approved": ventas_totales
     }
-    
-class WalletResponse(BaseModel):
-    _id: str
-    embajador_id: str
-    comision: float
-    fecha_actualizacion: datetime
-    total_ventas: float
 
+# ENDPOINT PARA OBTENER LA COMISION DE LA CARTERA POR EMBAJADOR
 @app.get("/wallet/comision-actualizada", summary="Obtener la comisión de la cartera")
 async def obtener_comision_actualizada(current_user: str = Depends(get_current_user)):
     """
@@ -788,31 +635,7 @@ async def obtener_comision_actualizada(current_user: str = Depends(get_current_u
             detail="Error al obtener la información de la cartera"
         ) from e
         
-class ProductItem(BaseModel):
-    title: str
-    unit_price: float
-    quantity: int
-
-# Modelo Pydantic para los pedidos
-class Order(BaseModel):
-    cedula: str
-    nombre: str
-    apellidos: str
-    pais_region: str
-    direccion_calle: str
-    numero_casa: str
-    estado_municipio: str
-    localidad_ciudad: str
-    telefono: str
-    correo_electronico: str
-    ref: str
-    productos: List[ProductItem]
-    total: float
-    status: Optional[str] = None
-    date_created: Optional[datetime] = None
-    transaction_id: Optional[str] = None
-
-# Endpoint para obtener los pedidos por cliente
+# ENDPOINT PARA OBTENER LOS PEDIDOS DE UN CLIENTE ESPECIFICO POR EMBAJADOR
 @app.get("/orders-by-client/{client_email}", response_model=List[Order])
 async def get_orders_by_client(client_email: str, current_user: str = Depends(get_current_user)):
     """
@@ -872,12 +695,8 @@ async def get_orders_by_client(client_email: str, current_user: str = Depends(ge
             detail=f"Error interno del servidor: {str(e)}"
         )
 
-class ApprovedOrderResponse(BaseModel):
-    status: str
-    fecha: str
-    id_transaccion: str
-    total: float
 
+# ENDPINT PARA OBTENER LOS PEDIDOS APROBADOS POR EMBAJADOR PARA LA WALLET
 @app.get("/approved-orders", response_model=List[ApprovedOrderResponse])
 async def get_approved_orders(current_user: str = Depends(get_current_user)):
     """
@@ -932,3 +751,4 @@ async def get_approved_orders(current_user: str = Depends(get_current_user)):
             status_code=500,
             detail=f"Error al obtener los pedidos aprobados: {str(e)}"
         )
+

@@ -1,13 +1,15 @@
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Bell } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 export function OrderList() {
   const [orders, setOrders] = useState<any[]>([]);
   const [notifications, setNotifications] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
 
   const clearNotifications = () => {
     setNotifications(0);
@@ -62,72 +64,130 @@ export function OrderList() {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-8">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">Pedidos Recientes</h2>
-        <Button variant="outline" size="sm" onClick={clearNotifications}>
-          <Bell className="mr-2 h-4 w-4" />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={clearNotifications}
+          className="flex items-center"
+        >
+          <Bell className="mr-2 h-5 w-5" />
           {notifications > 0 && (
             <Badge variant="destructive" className="ml-2">
               {notifications}
             </Badge>
           )}
-          Limpiar Notificaciones
+          <span className="hidden md:inline">Notificaciones</span>
         </Button>
       </div>
 
       {loading ? (
-        <div>Cargando...</div>
+        <div className="text-center text-gray-500">Cargando...</div>
       ) : orders.length === 0 ? (
-        <div>No hay pedidos disponibles.</div>
+        <div className="text-center text-gray-500">
+          No hay pedidos disponibles.
+        </div>
       ) : (
-        orders.map((order, index) => (
-          <Card key={order.transaction_id || index}>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <span>
-                  Pedido #{index + 1} - {order.nombre} {order.apellidos}
-                </span>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {orders.map((order, index) => (
+            <Card
+              key={order.transaction_id || index}
+              onClick={() => setSelectedOrder(order)}
+              className="cursor-pointer hover:shadow-xl transition w-full p-4"
+            >
+              <CardHeader>
+                <CardTitle className="flex flex-col space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium text-lg">
+                      Pedido #{index + 1}
+                    </span>
+                    <Badge
+                      variant={
+                        order.status === "pending"
+                          ? "destructive"
+                          : order.status === "approved"
+                          ? "default"
+                          : order.status === "rejected"
+                          ? "destructive"
+                          : "secondary"
+                      }
+                    >
+                      {order.status || "Pendiente"}
+                    </Badge>
+                  </div>
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>{order.nombre} {order.apellidos}</span>
+                    {order.date_created && (
+                      <span>{new Date(order.date_created).toLocaleDateString()}</span>
+                    )}
+                  </div>
+                  <div className="text-xl font-semibold">
+                    ${Math.round(order.total)}
+                  </div>
+                </CardTitle>
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {selectedOrder && (
+        <Dialog open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
+          <DialogContent className="w-full max-w-sm mx-auto p-4">
+            <DialogHeader>
+              <DialogTitle className="text-lg">Detalles del Pedido</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between">
+                <span className="font-medium">Cliente:</span>
+                <span>{selectedOrder.nombre} {selectedOrder.apellidos}</span>
+              </div>
+              {selectedOrder.transaction_id && (
+                <div className="flex justify-between">
+                  <span className="font-medium">ID de Transacción:</span>
+                  <span>{selectedOrder.transaction_id}</span>
+                </div>
+              )}
+              {selectedOrder.date_created && (
+                <div className="flex justify-between">
+                  <span className="font-medium">Fecha:</span>
+                  <span>{new Date(selectedOrder.date_created).toLocaleString()}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="font-medium">Estado:</span>
                 <Badge
                   variant={
-                    order.status === "pending"
+                    selectedOrder.status === "pending" || selectedOrder.status === "rejected"
                       ? "destructive"
-                      : order.status === "approved"
-                      ? "default"
-                      : "secondary"
+                      : "default"
                   }
                 >
-                  {order.status || "Sin estado"}
+                  {selectedOrder.status || "Pendiente"}
                 </Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {order.productos.map((item: any, itemIndex: number) => (
-                  <div key={itemIndex} className="flex justify-between text-sm">
-                    <span>
-                      {item.quantity}x {item.title} (${Math.round(item.unit_price)} c/u)
-                    </span>
+              </div>
+              <div className="space-y-1">
+                <span className="font-medium">Productos:</span>
+                {selectedOrder.productos.map((item: any, itemIndex: number) => (
+                  <div key={itemIndex} className="flex justify-between">
+                    <span>{item.quantity}x {item.title}</span>
                     <span>${Math.round(item.quantity * item.unit_price)}</span>
                   </div>
                 ))}
-                <div className="text-sm text-gray-500 mt-2">
-                  Fecha del pedido:{" "}
-                  {order.date_created
-                    ? new Date(order.date_created).toLocaleString()
-                    : "Fecha no disponible"}
-                </div>
-                <div className="text-sm text-gray-500 mt-2">
-                  ID de la transacción: {order.transaction_id || "No disponible"}
-                </div>
-                <div className="flex justify-between font-bold mt-4">
-                  <span>Total</span>
-                  <span>${Math.round(order.total)}</span>
-                </div>
               </div>
-            </CardContent>
-          </Card>
-        ))
+              <div className="flex justify-between">
+                <span className="font-medium">Dirección:</span>
+                <span>{`${selectedOrder.direccion_calle} ${selectedOrder.numero_casa}, ${selectedOrder.localidad_ciudad}, ${selectedOrder.estado_municipio}, ${selectedOrder.pais_region}`}</span>
+              </div>
+              <div className="flex justify-between font-bold text-lg">
+                <span>Total:</span>
+                <span>${Math.round(selectedOrder.total)}</span>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

@@ -1,43 +1,46 @@
-"use client"
+"use client";
 
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom"; // Necesitamos useNavigate para redirigir
+import { useNavigate } from "react-router-dom";
 import ProductList from "./product-list";
 import { Button } from "../../../components/ui/button";
-import { Share2 } from 'lucide-react';
+import { Share2 } from "lucide-react";
 import { ShareCatalogDialog } from "../../../components/share-catalog-dialog";
-import { validateAndCleanToken } from "../../../lib/auth"; // Importar la función de validación
+import { validateAndCleanToken } from "../../../lib/auth";
 
-export default function ProductsPage() {
+interface ProductsPageProps {
+  pais: string | null;
+}
+
+export default function ProductsPage({  }: ProductsPageProps) {
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
-  const navigate = useNavigate(); // hook para navegar
+  const navigate = useNavigate();
 
   useEffect(() => {
-    // Verificar y limpiar el token si no es válido
     validateAndCleanToken();
 
-    // Verificar si el token de acceso existe en localStorage
-    const token = localStorage.getItem('access_token');
-    
-    // Si no existe el token, redirigir al usuario a la página de login
+    const token = localStorage.getItem("access_token");
     if (!token) {
-      navigate('/'); // Redirige al inicio (login)
+      navigate("/"); // Redirige al inicio (login)
     }
   }, [navigate]);
 
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Productos</h1>
-        <Button onClick={() => setIsShareDialogOpen(true)}>
-          <Share2 className="mr-2 h-4 w-4" />
-          Compartir Catálogo
+        <h1 className="text-3xl font-bold mr-4">Productos</h1>
+        <Button
+          onClick={() => setIsShareDialogOpen(true)}
+          className="text-xs px-2 py-1 flex items-center justify-center space-x-2"
+        >
+          <Share2 className="mr-2 h-3 w-3" />
+          <span>Compartir Catálogo</span>
         </Button>
       </div>
-      <ProductList />
-      <ShareCatalogDialog 
-        isOpen={isShareDialogOpen} 
-        onClose={() => setIsShareDialogOpen(false)} 
+      <ProductList pais={localStorage.getItem("pais")} />
+      <ShareCatalogDialog
+        isOpen={isShareDialogOpen}
+        onClose={() => setIsShareDialogOpen(false)}
       />
     </div>
   );
