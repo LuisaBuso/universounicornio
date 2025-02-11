@@ -16,7 +16,7 @@ import jwt, requests
 from typing import List, Optional
 import os
 from dotenv import load_dotenv
-
+import urllib.parse
 # Importaciones de las colecciones desde database.py
 from database import (
     collection, collection_client, collection_transaction, 
@@ -78,6 +78,20 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 async def read_root():
     return {"message": "Bienvenido a la API de Embajadores"}
 
+@app.get("/api/pais")
+async def obtener_pais(ref: str = Query(..., description="Correo del embajador")):
+    # Decodificar el valor de ref para manejar caracteres como %40
+    ref_decoded = urllib.parse.unquote(ref).lower()  # Convertir a minúsculas
+
+    # Buscar embajador por email
+    embajador = await collection.find_one({"email": ref_decoded})
+    print("Conexión a Mongo válida:", collection.count_documents({}))
+
+    if not embajador:
+        raise HTTPException(status_code=404, detail="Embajador no encontrado")
+    
+    pais = embajador.get("pais", "País no definido")  # Manejo seguro
+    return {"id": str(embajador["_id"]), "email": embajador["email"], "pais": pais}
 
 # ENDPOINT PARA INICIAR SESION POR EMBAJADOR
 @app.post("/token", response_model=TokenResponse)
@@ -737,3 +751,4 @@ async def get_approved_orders(current_user: str = Depends(get_current_user)):
             status_code=500,
             detail=f"Error al obtener los pedidos aprobados: {str(e)}"
         )
+
