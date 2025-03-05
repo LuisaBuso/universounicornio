@@ -1,22 +1,40 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Wallet, BookOpen, Package, Users, User, ShoppingCart, LogOut } from 'lucide-react';
+import { Home, Wallet, BookOpen, Package, Users, User, ShoppingCart, LogOut, Store, Award, UserPlus} from 'lucide-react';
 
 interface NavegacionPrincipalProps {
   onLogout: () => void;
 }
 
-const navItems = [
-  { name: 'Panel', href: '/', icon: Home },
-  { name: 'Billetera', href: '/wallet', icon: Wallet },
-  { name: 'Aprendizaje', href: '/learning', icon: BookOpen },
-  { name: 'Productos', href: '/products', icon: Package },
-  { name: 'Clientes', href: '/clients', icon: Users },
-  { name: 'Pedidos', href: '/orders', icon: ShoppingCart },
-  { name: 'Perfil', href: '/profile', icon: User },
-];
-
 const NavegacionPrincipal: React.FC<NavegacionPrincipalProps> = ({ onLogout }) => {
   const location = useLocation();
+  const rol = localStorage.getItem('rol') || '';
+  const nombreNegocio = localStorage.getItem('nombre') || 'Nombre del Negocio';
+
+  // Función para manejar el cierre de sesión
+  const handleLogout = () => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('pais');
+    localStorage.removeItem('rol');
+    localStorage.removeItem('cart');
+    localStorage.removeItem('nombre');
+    localStorage.removeItem('negocio');
+    localStorage.removeItem('profileData');
+    onLogout();
+  };
+
+  // Filtrar los elementos de navegación según el rol del usuario
+  const navItems = [
+    { name: 'Panel', href: '/', icon: Home },
+    ...(rol !== 'Negocio' && rol !== 'Distribuidor' ? [{ name: 'Billetera', href: '/wallet', icon: Wallet }] : []), // Oculta "Billetera" si es "Negocio" o "Distribuidor"
+    { name: 'Aprendizaje', href: '/learning', icon: BookOpen },
+    { name: 'Productos', href: '/products', icon: Package },
+    ...(rol !== 'Negocio' && rol !== 'Distribuidor' ? [{ name: 'Clientes', href: '/clients', icon: Users }] : []), // Oculta "Clientes" si es "Negocio" o "Distribuidor"
+    ...(rol !== 'Embajador' ? [{ name: "Clientes Detallados", href: "/detailed-customers", icon: UserPlus }] : []), // Oculta "Clientes Detallados" si es "Embajador"
+    { name: 'Pedidos', href: '/orders', icon: ShoppingCart },
+    ...(rol !== 'Distribuidor' && rol !== 'Embajador' ? [{ name: "Distribuidores", href: "/distributors", icon: Store }] : []), // Oculta "Distribuidores" si es "Distribuidor" o "Embajador"
+    ...(rol === 'Distribuidor' ? [{ name: "Embajadores", href: "/ambassadors", icon: Award }] : []), // Muestra "Embajadores" solo si es "Distribuidor"
+    { name: 'Perfil', href: '/profile', icon: User },
+  ];
 
   return (
     <>
@@ -42,7 +60,14 @@ const NavegacionPrincipal: React.FC<NavegacionPrincipalProps> = ({ onLogout }) =
       <div className="hidden w-64 flex-shrink-0 border-r border-gray-200 bg-white md:block">
         <div className="flex h-full flex-col">
           <div className="flex h-16 flex-shrink-0 items-center px-4">
-            <h1 className="text-xl font-bold">Embajador de Marca</h1>
+            <h1 className="text-xl font-bold truncate whitespace-nowrap">
+              {rol === 'Negocio' 
+                ? nombreNegocio 
+                : rol === 'Distribuidor' 
+                  ? 'Distribuidor' 
+                  : 'Embajador de la Marca'
+              }
+            </h1>
           </div>
           <div className="flex flex-1 flex-col overflow-y-auto">
             <nav className="flex-1 space-y-1 px-4 py-4">
@@ -65,7 +90,7 @@ const NavegacionPrincipal: React.FC<NavegacionPrincipalProps> = ({ onLogout }) =
                 </Link>
               ))}
               <button
-                onClick={onLogout}
+                onClick={handleLogout}
                 className="group flex w-full items-center gap-3 rounded-md px-3 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 text-left"
               >
                 <LogOut className="h-6 w-6 flex-shrink-0 text-gray-400 group-hover:text-gray-500" />

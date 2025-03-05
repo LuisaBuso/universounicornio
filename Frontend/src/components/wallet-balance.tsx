@@ -57,7 +57,7 @@ export function WalletBalance({ pais }: WalletBalanceProps) {
     calcularYObtenerComision();
   }, []);
 
-  const moneda = pais === 'Mexico' ? 'MXN' : pais === 'Colombia' ? 'COP' : '$';
+  const moneda = pais === 'México' ? 'MXN' : pais === 'Colombia' ? 'COP' : '$';
 
   return (
     <Card>

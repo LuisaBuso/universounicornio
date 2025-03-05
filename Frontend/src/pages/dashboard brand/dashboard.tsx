@@ -14,10 +14,11 @@ export default function Dashboard() {
   const [walletBalance, setWalletBalance] = useState(0); // Estado para el saldo de la billetera
   const [loading, setLoading] = useState(true); // Estado para manejar la carga
   const [walletLoading, setWalletLoading] = useState(true); // Estado para la carga del saldo de la billetera
+  const [userRole, setUserRole] = useState<string | null>(null); // Estado para almacenar el rol del usuario
 
-  // Efecto para obtener las métricas desde la API
+  // Efecto para obtener el rol del usuario y las métricas
   useEffect(() => {
-    const fetchMetrics = async () => {
+    const fetchData = async () => {
       // Validar y limpiar el token antes de hacer la solicitud
       validateAndCleanToken();
 
@@ -31,78 +32,80 @@ export default function Dashboard() {
         return;
       }
 
+      // Decodificar el token para obtener el rol
+      const decodedToken = decodeToken(token);
+      setUserRole(decodedToken);
+
       try {
-        const response = await fetch('https://api.unicornio.tech/dashboard/metrics', {
+        // Obtener las métricas
+        const metricsResponse = await fetch('https://api.unicornio.tech/dashboard/metrics', {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${token}`, // Pasar el token en la cabecera
+            'Authorization': `Bearer ${token}`,
             'Accept': 'application/json',
           },
         });
 
-        if (response.ok) {
-          const data = await response.json();
+        if (metricsResponse.ok) {
+          const data = await metricsResponse.json();
           setMetrics(data); // Actualizar el estado con los datos recibidos
-          setLoading(false); // Finalizar el estado de carga
         } else {
           console.error('Error al obtener las métricas');
         }
-      } catch (error) {
-        console.error('Error de red', error);
-      }
-    };
 
-    fetchMetrics();
-  }, []); // Solo se ejecuta una vez al montar el componente
+        // Si el usuario NO es un negocio NI un distribuidor, obtener el saldo de la billetera
+        if (decodedToken !== 'Negocio' && decodedToken !== 'Distribuidor') {
+          // 1. Calcular la comisión
+          const calcularResponse = await fetch('https://api.unicornio.tech/calcular-comision', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/json',
+            },
+          });
 
-  // Efecto para obtener el saldo de la billetera
-  useEffect(() => {
-    const fetchWalletBalance = async () => {
-      const token = getValidatedToken();
-      if (!token) {
-        console.error('No token found');
-        return;
-      }
+          if (!calcularResponse.ok) {
+            console.error('Error al calcular la comisión');
+            return;
+          }
 
-      try {
-        // 1. Calcular la comisión
-        const calcularResponse = await fetch('https://api.unicornio.tech/calcular-comision', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-          },
-        });
+          // 2. Obtener la comisión actualizada
+          const obtenerResponse = await fetch('https://api.unicornio.tech/wallet/comision-actualizada', {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/json',
+            },
+          });
 
-        if (!calcularResponse.ok) {
-          console.error('Error al calcular la comisión');
-          return;
-        }
-
-        // 2. Obtener la comisión actualizada
-        const obtenerResponse = await fetch('https://api.unicornio.tech/wallet/comision-actualizada', {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-          },
-        });
-
-        if (obtenerResponse.ok) {
-          const data = await obtenerResponse.json();
-          setWalletBalance(data.comision); // Actualizar el saldo de la billetera
-        } else {
-          console.error('Error al obtener la comisión');
+          if (obtenerResponse.ok) {
+            const data = await obtenerResponse.json();
+            setWalletBalance(data.comision); // Actualizar el saldo de la billetera
+          } else {
+            console.error('Error al obtener la comisión');
+          }
         }
       } catch (error) {
         console.error('Error de red', error);
       } finally {
+        setLoading(false); // Finalizar el estado de carga
         setWalletLoading(false); // Finalizar el estado de carga del saldo
       }
     };
 
-    fetchWalletBalance();
+    fetchData();
   }, []);
+
+  // Función para decodificar el token
+  const decodeToken = (token: string) => {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1])); // Decodificar el payload del token
+      return payload.rol; // Asume que el rol está en el campo "rol"
+    } catch (error) {
+      console.error("Error decodificando el token:", error);
+      return null;
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -128,24 +131,31 @@ export default function Dashboard() {
               <div className="text-2xl font-bold">${metrics.ventas_totales_approved}</div>
             </CardContent>
           </Card>
+
+          {/* Mostrar la billetera solo si el usuario NO es un negocio NI un distribuidor */}
+          {userRole !== 'Negocio' && userRole !== 'Distribuidor' && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Billetera</CardTitle>
+                <Wallet className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                {walletLoading ? (
+                  <div>Cargando...</div>
+                ) : (
+                  <div className="text-2xl font-bold">
+                    {walletBalance > 0 ? `$${walletBalance.toFixed(2)}` : 'No hay saldo'}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Billetera</CardTitle>
-              <Wallet className="h-4 w-4 text-muted-foreground" /> {/* Cambia Package por Wallet */}
-            </CardHeader>
-            <CardContent>
-              {walletLoading ? (
-                <div>Cargando...</div>
-              ) : (
-                <div className="text-2xl font-bold">
-                  {walletBalance > 0 ? `$${walletBalance.toFixed(2)}` : 'No hay saldo'}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Clientes Activos</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                {userRole === 'Negocio' ? 'Distribuidores Totales' : 'Clientes Activos'}
+              </CardTitle>
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>

@@ -17,6 +17,9 @@ collection = db["ambassador"]
 collection_transaction = db["transacciones"]
 collection_pedidos = db["pedidos"]
 collection_wallet = db["wallet"]
+collection_bussiness = db["negocios"]
+collection_grandistribuidor = db["grandistribuidor"]
+collection_distribuidor = db["distribuidor"]
 
 # Configuración de JWT y bcrypt
 SECRET_KEY = "fcef76643904c159a46a66620f2d21aec3c055369bbb84b6ddbfb33a28bea14d"
