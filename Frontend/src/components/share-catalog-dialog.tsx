@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Button } from "../components/ui/button";
-import { WhatsappIcon } from "../components/icons"; // Asegúrate de tener estos íconos
-import { ClipboardIcon } from "../components/icons"; // Asegúrate de tener estos íconos
+import { WhatsappIcon, ClipboardIcon } from "../components/icons"; // Asegúrate de tener estos íconos
 
 interface ShareCatalogDialogProps {
   isOpen: boolean;
@@ -10,16 +9,26 @@ interface ShareCatalogDialogProps {
 }
 
 export function ShareCatalogDialog({ isOpen, onClose }: ShareCatalogDialogProps) {
-  const [ambassadorEmail, setAmbassadorEmail] = useState<string>("");
+  const [email, setEmail] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false); // Estado para mostrar el aviso de "Copiado"
 
   useEffect(() => {
     const fetchProfileData = async () => {
       try {
         const token = localStorage.getItem("access_token");
+        const rol = localStorage.getItem("rol");
         if (!token) throw new Error("No se encontró un token de acceso");
 
-        const response = await fetch("https://api.unicornio.tech/ambassadors", {
+        let endpoint = "";
+        if (rol === "Embajador") {
+          endpoint = "https://api.unicornio.tech/ambassadors";
+        } else if (rol === "Negocio") {
+          endpoint = "http://127.0.0.1:8000/negocios/perfil";
+        } else {
+          throw new Error("Rol no válido o no encontrado");
+        }
+
+        const response = await fetch(endpoint, {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -28,8 +37,8 @@ export function ShareCatalogDialog({ isOpen, onClose }: ShareCatalogDialogProps)
         if (!response.ok) throw new Error("Error al obtener los datos del perfil");
 
         const data = await response.json();
-        if (data?.email) {
-          setAmbassadorEmail(data.email); // Actualiza el correo del embajador
+        if (data?.email || data?.correo_electronico) {
+          setEmail(data.email || data.correo_electronico); // Actualiza el correo del embajador o negocio
         } else {
           throw new Error("Datos del perfil mal formateados");
         }
@@ -41,7 +50,7 @@ export function ShareCatalogDialog({ isOpen, onClose }: ShareCatalogDialogProps)
     fetchProfileData();
   }, []);
 
-  const catalogLink = `${window.location.origin}/catalog?ref=${encodeURIComponent(ambassadorEmail)}`;
+  const catalogLink = `${window.location.origin}/catalog?ref=${encodeURIComponent(email)}`;
 
   const shareOnWhatsApp = () => {
     const message = encodeURIComponent(

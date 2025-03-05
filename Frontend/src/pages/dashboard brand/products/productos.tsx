@@ -9,7 +9,7 @@ import { ShareCatalogDialog } from "../../../components/share-catalog-dialog";
 import { validateAndCleanToken } from "../../../lib/auth";
 
 interface ProductsPageProps {
-  pais: string | null;
+  pais?: string | null; // Hacerlo opcional con `?`
 }
 
 export default function ProductsPage({  }: ProductsPageProps) {

@@ -13,6 +13,9 @@ import Pedidos from './pages/dashboard brand/pedidos';
 import CatalogPage from './pages/dashboard brand/catalog';
 import Catalog_view from './components/catalog-view-men';
 import { CartProvider } from './components/carritoContext';
+import DistributorsPage from './pages/dashboard brand/distributors';
+import AmbassadorsPage from './pages/dashboard brand/ambassador';
+import CustomerDetails from './pages/dashboard brand/detailed-customers';
 import Cart from './components/cart';
 import CheckoutEnvio from './pages/dashboard brand/checkout';
 
@@ -87,7 +90,10 @@ function App() {
                       <Route path="/products" element={<Productos />} />
                       <Route path="/products/:id" element={<ProductDetails />} />
                       <Route path="/clients" element={<Clients />} />
+                      <Route path="/detailed-customers" element={<CustomerDetails />} />
                       <Route path="/orders" element={<Pedidos />} />
+                      <Route path="/distributors" element={<DistributorsPage />} />
+                      <Route path="/ambassadors" element={<AmbassadorsPage />} />
                       <Route path="/profile" element={<Profile />} />
                       <Route path="*" element={<Navigate to="/dashboard" />} />
                     </Routes>

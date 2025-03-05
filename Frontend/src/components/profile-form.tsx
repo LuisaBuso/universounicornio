@@ -4,10 +4,12 @@ import { Mail, Phone, MapPin, User } from "lucide-react";
 
 export function ProfileInfo() {
   const [profileData, setProfileData] = useState({
-    name: "",
+    nombre: "",
+    pais: "",
     whatsapp: "",
-    email: "",
-    address: "",
+    correo_electronico: "",
+    rol: "",
+    address: "", // Solo para embajadores
   });
 
   const [loading, setLoading] = useState(true);
@@ -17,11 +19,35 @@ export function ProfileInfo() {
     const fetchData = async () => {
       try {
         const token = localStorage.getItem("access_token");
+        let rol = localStorage.getItem("rol") || "";
+
         if (!token) {
           throw new Error("No se encontró un token de acceso");
         }
 
-        const response = await fetch("https://api.unicornio.tech/ambassadors", {
+        rol = rol.trim();
+
+        // Verificar si los datos ya están en el localStorage
+        const storedProfileData = localStorage.getItem("profileData");
+        if (storedProfileData) {
+          const parsedData = JSON.parse(storedProfileData);
+          setProfileData(parsedData);
+          setLoading(false);
+          return; // Si los datos ya están, no hacemos una nueva solicitud
+        }
+
+        let endpoint = "";
+        if (rol === "Embajador") {
+          endpoint = "http://127.0.0.1:8000/ambassadors";
+        } else if (rol === "Negocio") {
+          endpoint = "http://127.0.0.1:8000/negocios/perfil";
+        } else if (rol === "Distribuidor") {
+          endpoint = "http://127.0.0.1:8000/distribuidor/me"; // Nuevo endpoint para distribuidores
+        } else {
+          throw new Error("Rol no válido o no encontrado");
+        }
+
+        const response = await fetch(endpoint, {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -34,18 +60,50 @@ export function ProfileInfo() {
         const data = await response.json();
         console.log("Datos recibidos:", data);
 
-        // Aquí los datos ya están directamente disponibles
-        if (data) {
-          setProfileData({
-            name: data.full_name,
-            whatsapp: data.whatsapp_number,
-            email: data.email,
-            address: data.address || "Sin dirección proporcionada",
-          });
-        } else {
-          throw new Error("Datos del perfil mal formateados");
+        // Actualizar el estado con los datos correctos según el rol
+        let newProfileData = {
+          nombre: "",
+          pais: "",
+          whatsapp: "",
+          correo_electronico: "",
+          rol: "",
+          address: "",
+        };
+
+        if (rol === "Embajador") {
+          newProfileData = {
+            nombre: data.full_name || "",
+            pais: data.pais || "",
+            whatsapp: data.whatsapp_number || "",
+            correo_electronico: data.email || "",
+            rol: "Embajador",
+            address: data.address || "",
+          };
+        } else if (rol === "Negocio") {
+          newProfileData = {
+            nombre: data.nombre || "",
+            pais: data.pais || "",
+            whatsapp: data.whatsapp || "",
+            correo_electronico: data.correo_electronico || "",
+            rol: "Negocio",
+            address: "", // Los negocios no tienen dirección
+          };
+        } else if (rol === "Distribuidor") {
+          newProfileData = {
+            nombre: data.nombre || "",
+            pais: data.pais || "",
+            whatsapp: data.telefono || "", // Asume que el campo es "telefono"
+            correo_electronico: data.correo_electronico || "",
+            rol: "Distribuidor",
+            address: "", // Los distribuidores no tienen dirección
+          };
         }
 
+        // Guardar los datos en el localStorage
+        localStorage.setItem("profileData", JSON.stringify(newProfileData));
+
+        // Actualizar el estado
+        setProfileData(newProfileData);
         setLoading(false);
       } catch (err: any) {
         setError(err.message || "Hubo un problema al cargar los datos");
@@ -67,37 +125,60 @@ export function ProfileInfo() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Información del Perfil</CardTitle>
+        <CardTitle>
+          {profileData.rol === "Negocio"
+            ? "Información del Negocio"
+            : profileData.rol === "Distribuidor"
+            ? "Información del Distribuidor"
+            : "Información del Perfil"}
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex items-center space-x-4">
-          <User className="h-5 w-5 text-muted-foreground" />
-          <div>
-            <p className="text-sm font-medium leading-none">Nombre</p>
-            <p className="text-sm text-muted-foreground">{profileData.name}</p>
+        {profileData.nombre && (
+          <div className="flex items-center space-x-4">
+            <User className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium leading-none">Nombre</p>
+              <p className="text-sm text-muted-foreground">{profileData.nombre}</p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center space-x-4">
-          <Phone className="h-5 w-5 text-muted-foreground" />
-          <div>
-            <p className="text-sm font-medium leading-none">WhatsApp</p>
-            <p className="text-sm text-muted-foreground">{profileData.whatsapp}</p>
+        )}
+        {profileData.pais && (
+          <div className="flex items-center space-x-4">
+            <MapPin className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium leading-none">País</p>
+              <p className="text-sm text-muted-foreground">{profileData.pais}</p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center space-x-4">
-          <Mail className="h-5 w-5 text-muted-foreground" />
-          <div>
-            <p className="text-sm font-medium leading-none">Correo Electrónico</p>
-            <p className="text-sm text-muted-foreground">{profileData.email}</p>
+        )}
+        {profileData.whatsapp && (
+          <div className="flex items-center space-x-4">
+            <Phone className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium leading-none">WhatsApp</p>
+              <p className="text-sm text-muted-foreground">{profileData.whatsapp}</p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center space-x-4">
-          <MapPin className="h-5 w-5 text-muted-foreground" />
-          <div>
-            <p className="text-sm font-medium leading-none">Dirección</p>
-            <p className="text-sm text-muted-foreground">{profileData.address}</p>
+        )}
+        {profileData.correo_electronico && (
+          <div className="flex items-center space-x-4">
+            <Mail className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium leading-none">Correo Electrónico</p>
+              <p className="text-sm text-muted-foreground">{profileData.correo_electronico}</p>
+            </div>
           </div>
-        </div>
+        )}
+        {profileData.rol === "Embajador" && profileData.address && (
+          <div className="flex items-center space-x-4">
+            <MapPin className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium leading-none">Dirección</p>
+              <p className="text-sm text-muted-foreground">{profileData.address}</p>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

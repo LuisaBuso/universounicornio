@@ -4,7 +4,7 @@ import { Input } from "../../components/ui/input";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
 
 interface LoginFormProps {
-  onLogin?: (email: string, token: string) => void;
+  onLogin?: (token: string, pais: string) => void;
 }
 
 export default function LoginForm({ onLogin }: LoginFormProps) {
@@ -16,51 +16,70 @@ export default function LoginForm({ onLogin }: LoginFormProps) {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-
-    console.log('Iniciando sesión con:', { email, password });
-
+  
+    // Convertir el email a minúsculas antes de enviarlo
+    const lowerCaseEmail = email.toLowerCase(); // <-- Esta es la única línea añadida
+  
+    console.log('Iniciando sesión con:', { email: lowerCaseEmail, password });
+  
     try {
       const formData = new FormData();
-      formData.append('username', email);  // Enviar 'email' como 'username'
+      formData.append('username', lowerCaseEmail);  // Usar el email en minúsculas
       formData.append('password', password);
-
-      const response = await fetch('https://api.unicornio.tech/token', {
+  
+      const response = await fetch('http://127.0.0.1:8000/token', {
         method: 'POST',
-        body: formData,  // Enviar FormData en lugar de JSON
+        body: formData,
       });
-
+  
       if (!response.ok) {
         const data = await response.json();
         setErrorMessage(data.detail || 'Error al iniciar sesión');
         return;
       }
-
+  
       const data = await response.json();
-
+  
       // Guardar token y país en el localStorage
       const token = data.access_token;
       const decodedToken = JSON.parse(atob(token.split('.')[1])); // Decodificar el token JWT
       const pais = decodedToken.pais;  // Obtener el país del token
-
+  
       console.log('Login exitoso:', data);
       console.log('País del embajador:', pais);
-
-      // Verificar si el embajador está en la URL correcta
-      const currentUrl = window.location.href;
-      const isMXUrl = currentUrl.includes('rizosfelicesmx.unicornio.tech');
-      const isCOUrl = currentUrl.includes('rizosfelicesco.unicornio.tech');
-
-      if ((pais === 'México' && !isMXUrl) || (pais === 'Colombia' && !isCOUrl)) {
-        // Mostrar mensaje de redirección
-        setShowRedirectMessage(true);
-        setCorrectUrl(pais === 'México' ? 'https://rizosfelicesmx.unicornio.tech' : 'https://rizosfelicesco.unicornio.tech');
-        return;
+      
+      // Verificar si el entorno es localhost
+      const isLocalhost = window.location.href.includes('localhost');
+  
+      // Si no es localhost, verificar la URL correcta según el país
+      if (!isLocalhost) {
+        const currentUrl = window.location.href;
+        const isMXUrl = currentUrl.includes('rizosfelicesmx.unicornio.tech');
+        const isCOUrl = currentUrl.includes('rizosfelicesco.unicornio.tech');
+  
+        if (pais === 'México' && !isMXUrl) {
+          // Mostrar mensaje de redirección para México
+          setShowRedirectMessage(true);
+          setCorrectUrl('https://rizosfelicesmx.unicornio.tech');
+          return;
+        }
+  
+        if (pais === 'Colombia' && !isCOUrl) {
+          // Mostrar mensaje de redirección para Colombia
+          setShowRedirectMessage(true);
+          setCorrectUrl('https://rizosfelicesco.unicornio.tech');
+          return;
+        }
       }
-
+  
       // Guardar el token y el país en el localStorage
       localStorage.setItem('access_token', token);
       localStorage.setItem('pais', pais);
-
+      const rol = decodedToken.rol;  // Obtener el rol del token
+      localStorage.setItem('rol', rol);
+      const nombre = decodedToken.nombre;  // Obtener el nombre del token
+      localStorage.setItem('nombre', nombre);
+  
       if (onLogin) {
         onLogin(token, pais);
       }
@@ -113,19 +132,28 @@ export default function LoginForm({ onLogin }: LoginFormProps) {
             {errorMessage && <p className="text-red-500 text-sm">{errorMessage}</p>}
             {showRedirectMessage && (
               <div className="mt-4 p-4 bg-yellow-100 border border-yellow-400 text-yellow-700 rounded-md">
-                <p>
+                <p className="text-sm font-medium">
                   Estás intentando iniciar sesión en la página incorrecta. Debes hacerlo en:{' '}
-                  <a href={correctUrl} className="font-bold underline">
+                  <a href={correctUrl} className="font-bold underline hover:text-yellow-800">
                     {correctUrl}
                   </a>
                 </p>
-                <Button
-                  type="button"
-                  className="w-full mt-2 bg-yellow-500 hover:bg-yellow-600"
-                  onClick={handleRedirect}
-                >
-                  Ir a la página correcta
-                </Button>
+                <div className="mt-3 flex flex-col space-y-2">
+                  <Button
+                    type="button"
+                    className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-2 rounded-md"
+                    onClick={handleRedirect}
+                  >
+                    Ir a la página correcta
+                  </Button>
+                  <Button
+                    type="button"
+                    className="w-full bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 rounded-md"
+                    onClick={() => setShowRedirectMessage(false)}
+                  >
+                    Cerrar
+                  </Button>
+                </div>
               </div>
             )}
             <CardFooter className="flex justify-center mt-6">
