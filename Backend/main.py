@@ -8,7 +8,9 @@ from jose import JWTError
 from schemas import (
     TokenResponse, UserCreate, UserProfile, ClientData, 
     PreferenceRequest, ProductItem, PedidoMongo, 
-    ClientCreate, Order, ApprovedOrderResponse
+    ClientCreate, Order, ApprovedOrderResponse,
+    Bussiness, BussinessLogin, Distribuidor, DistribuidorCreate,
+    DistribuidorResponse, DistribuidorUpdate, EmbajadorUpdate
 )
 from datetime import datetime, timedelta
 import mercadopago
@@ -17,11 +19,13 @@ from typing import List, Optional
 import os
 from dotenv import load_dotenv
 import urllib.parse
+from bson import ObjectId
 # Importaciones de las colecciones desde database.py
 from database import (
     collection, collection_client, collection_transaction, 
-    collection_pedidos, collection_wallet, verify_password, 
-    create_access_token, SECRET_KEY, ALGORITHM
+    collection_pedidos, collection_wallet, collection_bussiness,
+    collection_grandistribuidor, collection_distribuidor,
+    verify_password, create_access_token, SECRET_KEY, ALGORITHM
 )
 
 # Configuración de FastAPI
@@ -29,11 +33,39 @@ app = FastAPI()
 
 load_dotenv()
 
-PUBLIC_KEY = os.getenv("PUBLIC_KEY")
-ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
-MERCADO_PAGO_API_URL = "https://api.mercadopago.com/v1/payments"
 
-sdk = mercadopago.SDK(ACCESS_TOKEN)
+MERCADO_PAGO_API_URL = "https://api.mercadopago.com/v1/payments"
+BUSINESS_CREDENTIALS = {
+    "67b4ec6810a08e4b0f7c6dd8": {  # Green Energy Ltda.
+        "access_token": os.getenv("GREEN_ENERGY_ACCESS_TOKEN", "").strip(),
+        "public_key": os.getenv("GREEN_ENERGY_PUBLIC_KEY", "").strip(),
+        "domain": "https://rizosfelicesmx.unicornio.tech/"
+    },
+    "67b612f312f5bcc5b8892540": {  # Café Bogotá
+        "access_token": os.getenv("CAFE_BOGOTA_ACCESS_TOKEN", "").strip(),
+        "public_key": os.getenv("CAFE_BOGOTA_PUBLIC_KEY", "").strip(),
+        "domain": "https://rizosfelicesmx.unicornio.tech/"
+    }
+}
+import os
+
+print("🔹 GREEN_ENERGY_ACCESS_TOKEN:", os.getenv("GREEN_ENERGY_ACCESS_TOKEN"))
+print("🔹 CAFE_BOGOTA_ACCESS_TOKEN:", os.getenv("CAFE_BOGOTA_ACCESS_TOKEN"))
+
+# Verificar que cada negocio tenga un ACCESS_TOKEN válido
+for business_id, credentials in BUSINESS_CREDENTIALS.items():
+    if not credentials["access_token"]:
+        print(f"❌ ERROR: ACCESS_TOKEN de {business_id} no está definido en el .env")
+        raise ValueError(f"ACCESS_TOKEN de {business_id} no está definido en el .env")
+    else:
+        print(f"✅ ACCESS_TOKEN encontrado para negocio {business_id}")
+
+    # Crear instancia del SDK de Mercado Pago
+    credentials["sdk"] = mercadopago.SDK(credentials["access_token"])
+
+# Inicializar FastAPI
+app = FastAPI()
+
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
@@ -54,24 +86,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Dependencia que extrae el email del embajador desde el token
 async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No se pudieron validar las credenciales",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_email = payload.get("sub")  # El email está en el campo "sub" del payload
-        if not user_email:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="No se pudo validar el token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return user_email  # Devolvemos el email del embajador
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        email: str = payload.get("sub")
+        rol: str = payload.get("rol")
+        
+        print("📢 Usuario autenticado:", {"email": email, "rol": rol})  # <-- Agregar print
+        
+        if not email or not rol:
+            raise credentials_exception
+        return {"email": email, "rol": rol}
+    except jwt.PyJWTError:
+        raise credentials_exception
 
 
 @app.get("/")
@@ -93,82 +125,144 @@ async def obtener_pais(ref: str = Query(..., description="Correo del embajador")
     pais = embajador.get("pais", "País no definido")  # Manejo seguro
     return {"id": str(embajador["_id"]), "email": embajador["email"], "pais": pais}
 
-# ENDPOINT PARA INICIAR SESION POR EMBAJADOR
+# ENDPOINT PARA INICIAR SESIÓN POR ROLES (INCLUYENDO EMBAJADORES)
 @app.post("/token", response_model=TokenResponse)
-async def login_user(
-    username: str = Form(...),  # Swagger envía "username" en lugar de "email"
-    password: str = Form(...)
+async def login(
+    username: str = Form(...),  # Correo electrónico
+    password: str = Form(...)   # Contraseña
 ):
-    """
-    Endpoint para iniciar sesión y obtener token JWT.
-    - Usar el username (email) y password para obtener el token.
-    """
-    # Buscar el usuario por el email
+    user = None  # Inicializamos la variable user
+
+    # Buscar el usuario en la colección de embajadores
     user = await collection.find_one({"email": username})
-    if not user:
-        raise HTTPException(status_code=400, detail="Usuario no encontrado.")
+    if user:
+        email_field = "email"  # Para embajadores, el correo está en "email"
+        nombre = user.get("full_name")
+        rol = user.get("rol", "Embajador")  # Si no tiene rol explícito, asumir "Embajador"
+    else:
+        # Buscar en la colección de negocios
+        user = await collection_bussiness.find_one({"correo_electronico": username})
+        if user:
+            email_field = "correo_electronico"
+            nombre = user.get("nombre")
+            rol = user.get("rol")
+        else:
+            # Buscar en la colección de grandistribuidores
+            user = await collection_grandistribuidor.find_one({"correo_electronico": username})
+            if user:
+                email_field = "correo_electronico"
+                nombre = user.get("nombre")
+                rol = user.get("rol")
+            else:
+                # Buscar en la colección de distribuidores
+                user = await collection_distribuidor.find_one({"correo_electronico": username})
+                if user:
+                    email_field = "correo_electronico"
+                    nombre = user.get("nombre")
+                    rol = user.get("rol")
+                else:
+                    raise HTTPException(status_code=400, detail="Usuario no encontrado.")
 
     # Verificar la contraseña
-    if not verify_password(password, user["hashed_password"]):
+    if not verify_password(password, user.get("hashed_password")):
         raise HTTPException(status_code=401, detail="Contraseña incorrecta.")
 
-    # Generar el token
+    # Obtener país del usuario
+    pais = user.get("pais")
+
+    # Si el usuario es un distribuidor y no tiene rol, asignarle "Distribuidor"
+    if not rol and user.get("negocio_id"):
+        rol = "Distribuidor"
+
+    # Asegurar que el rol sea válido
+    if rol not in ["Negocio", "Grandistribuidor", "Distribuidor", "Embajador"]:
+        raise HTTPException(status_code=403, detail="Rol no válido.")
+
+    # Crear el token de acceso
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user["email"], "pais": user["pais"]},  # Agregar 'pais' al token
+        data={"sub": user[email_field], "rol": rol, "nombre": nombre, "pais": pais},
         expires_delta=access_token_expires
     )
 
-    # Retornar el token y el tipo
-    return {
-        "access_token": access_token,
-        "token_type": "bearer"
-    }
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        rol=rol,
+        nombre=nombre,
+        pais=pais
+    )
 
 # ENDPOINT PARA CREAR UN NUEVO EMBAJADOR
-@app.post("/users/", status_code=201)
-async def create_user(user: UserCreate):
-    # Verificar si el usuario ya existe por correo electrónico
-    existing_user = await collection.find_one({"email": user.email})
+@app.post("/crear-embajador/", status_code=status.HTTP_201_CREATED)
+async def crear_embajador(
+    embajador: UserCreate, 
+    current_user: dict = Depends(get_current_user)
+):
+    # Verificar que el usuario autenticado sea un Distribuidor
+    if current_user["rol"] != "Distribuidor":
+        raise HTTPException(status_code=403, detail="No autorizado para crear embajadores")
+
+    # Buscar el ObjectId del distribuidor autenticado
+    distribuidor = await collection_distribuidor.find_one({})
+    print(distribuidor)
+    if not distribuidor:
+        raise HTTPException(status_code=404, detail="Distribuidor no encontrado")
+    
+    distribuidor_id = distribuidor["_id"]  # Obtener el ObjectId
+
+    # Verificar si el embajador ya existe por correo electrónico
+    existing_user = await collection.find_one({"email": embajador.email})
     if existing_user:
-        raise HTTPException(status_code=400, detail="El usuario ya existe.")
+        raise HTTPException(status_code=400, detail="El embajador ya existe.")
 
     # Encriptar la contraseña antes de guardarla
-    hashed_password = pwd_context.hash(user.password)
-    
-    # Crear el nuevo embajador con la información incluida
-    new_user = {
-        "email": user.email,
+    hashed_password = pwd_context.hash(embajador.password)
+
+    # Crear el nuevo embajador con el ObjectId del distribuidor
+    new_embajador = {
+        "email": embajador.email,
         "hashed_password": hashed_password,
-        "full_name": user.full_name,
-        "whatsapp_number": user.whatsapp_number,
-        "pais": user.pais,  # Guardar el país del embajador
-        "disabled": False,
+        "full_name": embajador.full_name,
+        "whatsapp_number": embajador.whatsapp_number,
+        "pais": embajador.pais,
+        "rol": "Embajador",  # Rol asignado automáticamente
+        "distribuidor_id": distribuidor_id  # Guardar el ObjectId del distribuidor
     }
+    # Insertar el embajador en la base de datos
+    result = await collection.insert_one(new_embajador)
 
-    # Insertar el nuevo usuario en la base de datos
-    result = await collection.insert_one(new_user)
+    # Devolver el ID del nuevo embajador creado
+    return {
+        "mensaje": "Embajador creado exitosamente",
+        "id": str(result.inserted_id),
+        "distribuidor_id": str(distribuidor_id)  # Devolver el ID del distribuidor
+    }
+ 
     
-    # Devolver la respuesta con el ID del usuario y su email
-    return {"id": str(result.inserted_id), "email": user.email, "pais": user.pais}
-
 # ENDPOINT PARA LOS DATOS DEL EMBAJADOR AUTENTICADO
 @app.get("/ambassadors", response_model=UserProfile)
-async def get_user_profile(current_user: str = Depends(get_current_user)):
-    # Usa await para obtener el resultado de la consulta
-    user = await collection.find_one({"email": current_user})
-    
+async def get_user_profile(current_user: dict = Depends(get_current_user)):
+    # Obtener el usuario de la base de datos
+    user = await collection.find_one({"email": current_user["email"]})
+
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
+    # Verificar si el usuario tiene el rol de "Embajador"
+    if user.get("rol") != "Embajador":
+        raise HTTPException(status_code=403, detail="Acceso denegado: no tienes el rol de embajador")
+
+    # Construir el perfil del embajador
     profile_data = {
         "full_name": user.get("full_name"),
         "whatsapp_number": user.get("whatsapp_number"),
         "email": user.get("email"),
         "address": user.get("address", "Sin dirección proporcionada"),
+        "rol": user.get("rol"),
     }
 
-    return profile_data  # Devuelve los datos directamente
+    return profile_data
 
 # ENDPOINT PARA OBTENER LOS CLIENTES ASOCIADOS A UN EMBAJADOR
 @app.get("/clients", response_model=List[ClientData])
@@ -237,85 +331,92 @@ async def create_client(client_data: ClientCreate, current_user: str = Depends(g
 @app.post("/create-preference")
 async def create_preference(request: PreferenceRequest):
     try:
-        print("Datos recibidos:", request.dict())
+        print("🔹 Datos recibidos:", request.dict())
 
-        # Calcular el total del pedido
+        # Buscar las credenciales del negocio (simulado)
+        negocio_id = "67b4ec6810a08e4b0f7c6dd8"
+        if negocio_id not in BUSINESS_CREDENTIALS:
+            raise HTTPException(status_code=400, detail="Negocio sin credenciales de Mercado Pago")
+
+        credenciales = BUSINESS_CREDENTIALS[negocio_id]
+        access_token = credenciales["access_token"].strip()
+
+        print(f"✅ Credenciales encontradas para negocio {negocio_id}")
+
+        # **Validación del access_token antes de usarlo**
+        if not access_token:
+            raise HTTPException(status_code=500, detail="El access_token de Mercado Pago es inválido")
+
+        # **Validar el access_token con Mercado Pago**
+        headers = {"Authorization": f"Bearer {access_token}"}
+        user_response = requests.get("https://api.mercadopago.com/users/me", headers=headers)
+
+        if user_response.status_code != 200:
+            print("❌ Error: Access Token inválido", user_response.status_code, user_response.text)
+            raise HTTPException(status_code=400, detail="El access_token proporcionado no es válido")
+
+        # **Crear el SDK con el access_token**
+        sdk = mercadopago.SDK(access_token)
+
+        # **Calcular el total del pedido**
         total = sum(item.unit_price * item.quantity for item in request.items)
 
-        # Crear el documento para MongoDB
-        pedido_data = PedidoMongo(
-            cedula=request.cedula,
-            nombre=request.nombre,
-            apellidos=request.apellidos,
-            pais_region=request.pais_region,
-            direccion_calle=request.direccion_calle,
-            numero_casa=request.numero_casa,
-            estado_municipio=request.estado_municipio,
-            localidad_ciudad=request.localidad_ciudad,
-            telefono=request.telefono,
-            correo_electronico=request.correo_electronico,
-            ref=request.ref,
-            productos=request.items,
-            total=total,
-        )
+        # **Simulación de guardado del pedido en BD**
+        pedido_id = "67c7ce40a0a56ed0d0be05ee"  # ID simulado
 
-        # Guardar el pedido en MongoDB
-        result = await collection_pedidos.insert_one(pedido_data.dict())
-        pedido_id = str(result.inserted_id)  # Obtener el ObjectId generado por MongoDB
+        print(f"✅ Pedido simulado guardado con ID: {pedido_id}")
 
-        # Crear la preferencia de pago para Mercado Pago
+        # **Crear la preferencia de pago en Mercado Pago**
         preference_data = {
-            "items": [
-                {
-                    "title": item.title,
-                    "quantity": item.quantity,
-                    "unit_price": float(item.unit_price),  # Precio unitario
-                }
-                for item in request.items
-            ],
-            "external_reference": pedido_id,  # Usar el ObjectId como referencia externa
+            "items": [{"title": item.title, "quantity": item.quantity, "unit_price": item.unit_price} for item in request.items],
+            "external_reference": pedido_id,
             "back_urls": {
-                "success": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}",
-                "failure": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}",
-                "pending": f"https://rizosfelicesmx.unicornio.tech/catalog?ref={request.ref}",
+                # ARREGLAR PARA BACK URL QUITAR CATALOG PARA QUE NO LO REDIRIGA AL LOGIN DE LA PAGINA BASE
+                "success": f"{credenciales['domain']}/catalog?ref={request.ref}",
+                "failure": f"{credenciales['domain']}/catalog?ref={request.ref}",
+                "pending": f"{credenciales['domain']}/catalog?ref={request.ref}",
             },
             "auto_return": "approved",
             "notification_url": "https://api.unicornio.tech/webhook",
         }
 
-        # Crear la preferencia en Mercado Pago
+        print(f"😪✔ Enviando datos a Mercado Pago: {preference_data}")
         preference_response = sdk.preference().create(preference_data)
-        print("Respuesta de Mercado Pago:", preference_response)
 
-        # Verificar si la respuesta contiene 'init_point'
+        print("🔹 Respuesta de Mercado Pago:", preference_response)
+
+        # **Manejo de errores en la respuesta**
         if "response" in preference_response and "init_point" in preference_response["response"]:
-            init_point = preference_response["response"]["init_point"]
+            return {"init_point": preference_response["response"]["init_point"]}
         else:
-            print("Error en la respuesta de Mercado Pago:", preference_response)
-            raise HTTPException(
-                status_code=500,
-                detail="Error al crear la preferencia en Mercado Pago. Verifica los datos enviados.",
-            )
-
-        # Devolver la URL de pago
-        return JSONResponse({"init_point": init_point})
+            print("❌ Error en la respuesta de Mercado Pago:", preference_response)
+            raise HTTPException(status_code=500, detail="Error al crear la preferencia en Mercado Pago. Verifica los datos enviados.")
 
     except Exception as e:
-        print("Error al crear la preferencia:", str(e))
+        print("❌ Error al crear la preferencia:", str(e))
         raise HTTPException(status_code=422, detail=str(e))
 
 # ENDPOINT PARA TRAER TODOS LOS PAGOS HECHOS POR MEDIO DE MERCADO PAGO
 @app.get("/payments")
-async def get_all_payments(begin_date: str, end_date: str, limit: int = 50, offset: int = 0):
+async def get_all_payments(negocio_id: str, begin_date: str, end_date: str, limit: int = 50, offset: int = 0):
     """
-    Endpoint para obtener todas las compras realizadas en Mercado Pago.
+    Endpoint para obtener todas las compras realizadas en Mercado Pago de un negocio específico.
     
     Parámetros:
+    - negocio_id: ID del negocio cuyos pagos quieres ver.
     - begin_date: Fecha de inicio en formato ISO 8601 (e.g., "2025-01-01T00:00:00Z").
     - end_date: Fecha de fin en formato ISO 8601 (e.g., "2025-01-09T23:59:59Z").
     - limit: Número máximo de resultados por página.
     - offset: Offset para la paginación.
     """
+
+    # Verificar si el negocio existe en las credenciales
+    if negocio_id not in BUSINESS_CREDENTIALS:
+        raise HTTPException(status_code=400, detail="Negocio no registrado en Mercado Pago")
+
+    # Obtener el SDK correcto
+    sdk = BUSINESS_CREDENTIALS[negocio_id]["sdk"]
+
     filters = {
         "range": "date_created",
         "begin_date": begin_date,
@@ -335,25 +436,8 @@ async def get_all_payments(begin_date: str, end_date: str, limit: int = 50, offs
         # Extraer los resultados de pagos
         payments = response["response"]["results"]
 
-        # Extraer y guardar solo los datos necesarios en MongoDB
-        for payment in payments:
-            payment_data = {
-                "product_name": payment["additional_info"]["items"][0]["title"] if "items" in payment["additional_info"] else None,
-                "quantity": payment["additional_info"]["items"][0]["quantity"] if "items" in payment["additional_info"] else None,
-                "payer_phone": payment["payer"]["phone"]["number"] if "phone" in payment["payer"] else None,
-                "payer_email": payment["payer"]["email"] if "email" in payment["payer"] else None,
-                "transaction_amount": payment["transaction_amount"],
-                "currency_id": payment["currency_id"],
-                "status": payment["status"],
-                "status_detail": payment["status_detail"],
-                "date_created": payment["date_created"]
-            }
-
-            # Insertar el pago en la colección "transacciones"
-            collection_transaction.insert_one(payment_data)
-
         return {"payments": payments}
-    
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -464,15 +548,30 @@ async def webhook(request: Request):
         print("Notificación recibida:", payment)
 
         # Obtener el payment_id desde los datos recibidos
-        payment_id = payment.get("data", {}).get("id")  # Esto es para cuando el id está dentro de "data"
+        payment_id = payment.get("data", {}).get("id") or payment.get("id")  
         if not payment_id:
-            payment_id = payment.get("id")  # Esto es para cuando el id está a nivel superior
+            raise HTTPException(status_code=400, detail="No se recibió un payment_id válido")
+
+        # Consultar el pago en Mercado Pago (pero primero obtener el negocio correcto)
+        pedido = await collection_pedidos.find_one({"_id": ObjectId(payment.get("external_reference"))})
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado en la base de datos")
+
+        # Buscar al embajador asociado con el pedido
+        embajador = await collection.find_one({"email": pedido["ref"]})
+        if not embajador:
+            raise HTTPException(status_code=404, detail="Embajador no encontrado")
+
+        # Obtener el negocio asociado al embajador
+        negocio_id = embajador.get("negocio_id")
+        if not negocio_id or negocio_id not in BUSINESS_CREDENTIALS:
+            raise HTTPException(status_code=400, detail="El embajador no tiene un negocio válido con credenciales")
+
+        access_token = BUSINESS_CREDENTIALS[negocio_id]["access_token"]
 
         # Consultar los detalles del pago usando la API de Mercado Pago
         url = f"https://api.mercadopago.com/v1/payments/{payment_id}"
-        headers = {
-            "Authorization": f"Bearer {ACCESS_TOKEN}"
-        }
+        headers = {"Authorization": f"Bearer {access_token}"}
         response = requests.get(url, headers=headers)
 
         # Manejo de la respuesta de la API de Mercado Pago
@@ -752,3 +851,562 @@ async def get_approved_orders(current_user: str = Depends(get_current_user)):
             detail=f"Error al obtener los pedidos aprobados: {str(e)}"
         )
 
+# Endpoint para registrar un negocio
+@app.post("/negocios/registro", status_code=status.HTTP_201_CREATED)
+async def registrar_negocio(negocio: Bussiness):
+    # Verificar si el negocio ya existe por correo electrónico
+    existing_negocio = await collection_bussiness.find_one({"correo_electronico": negocio.correo_electronico})
+    if existing_negocio:
+        raise HTTPException(status_code=400, detail="El negocio ya está registrado.")
+
+    # Validar que el rol sea uno de los permitidos
+    if negocio.rol not in ["Negocio", "Grandistribuidor", "Distribuidor", "Embajador"]:
+        raise HTTPException(status_code=400, detail="Rol no válido.")
+
+    # Encriptar la contraseña antes de guardarla
+    hashed_password = pwd_context.hash(negocio.password)
+
+    # Crear el nuevo negocio
+    nuevo_negocio = {
+        "nombre": negocio.nombre,
+        "pais": negocio.pais,
+        "whatsapp": negocio.whatsapp,
+        "correo_electronico": negocio.correo_electronico,
+        "hashed_password": hashed_password,
+        "rol": negocio.rol,  # Guardar el rol del negocio
+    }
+
+    # Insertar el negocio en la colección `negocios`
+    result = await collection_bussiness.insert_one(nuevo_negocio)
+
+    if result.inserted_id:
+        return {
+            "mensaje": "Negocio registrado exitosamente",
+            "id": str(result.inserted_id),
+            "rol": negocio.rol,  # Incluir el rol en la respuesta
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Error al registrar el negocio.")
+
+# Endpoint para iniciar sesión de un negocio
+@app.post("/negocios/login", response_model=TokenResponse)
+async def login_negocio(login_data: BussinessLogin):
+    # Buscar el negocio por correo electrónico
+    negocio = await collection_bussiness.find_one({"correo_electronico": login_data.correo_electronico})
+    if not negocio:
+        raise HTTPException(status_code=400, detail="Negocio no encontrado.")
+
+    # Verificar la contraseña
+    if not verify_password(login_data.password, negocio["hashed_password"]):
+        raise HTTPException(status_code=401, detail="Contraseña incorrecta.")
+
+    # Generar el token JWT
+    access_token_expires = timedelta(minutes=30)
+    access_token = create_access_token(
+        data={"sub": negocio["correo_electronico"], "tipo": "negocio"},
+        expires_delta=access_token_expires
+    )
+
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# ENDPOINT PARA TRAER LOS DATOS DEL NEGOCIO AUTENTICADO
+@app.get("/negocios/perfil")
+async def obtener_perfil_negocio(current_user: dict = Depends(get_current_user)):
+    # Verificar que el usuario tenga el rol "Negocio"
+    if current_user["rol"] != "Negocio":
+        raise HTTPException(status_code=403, detail="Acceso denegado. Solo para negocios.")
+
+    # Buscar el negocio en la colección de negocios
+    negocio = await collection_bussiness.find_one({"correo_electronico": current_user["email"]})
+    if not negocio:
+        raise HTTPException(status_code=404, detail="Negocio no encontrado.")
+
+    # Devolver los datos del negocio (excluyendo la contraseña)
+    return {
+        "nombre": negocio.get("nombre"),
+        "pais": negocio.get("pais"),
+        "whatsapp": negocio.get("whatsapp"),
+        "correo_electronico": negocio.get("correo_electronico"),
+        "rol": negocio.get("rol"),
+    }
+
+# ENDPOINT PARA CREAR DISRTRIBUIDORES
+@app.post("/distribuidores/", response_model=Distribuidor)
+async def crear_distribuidor(
+    distribuidor: DistribuidorCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    # Verificar que el usuario autenticado sea un negocio
+    if current_user["rol"] != "Negocio":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo los negocios pueden crear distribuidores"
+        )
+
+    # Obtener el ID del negocio autenticado
+    negocio = await collection_bussiness.find_one({"correo_electronico": current_user["email"]})
+    if not negocio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El negocio autenticado no existe en la base de datos"
+        )
+
+    # Verificar si el correo ya está registrado como distribuidor
+    existing_distribuidor_correo = await collection_distribuidor.find_one(
+        {"correo_electronico": distribuidor.correo_electronico}
+    )
+    if existing_distribuidor_correo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El correo ya está registrado como distribuidor"
+        )
+
+    # Verificar si el número de teléfono ya está registrado como distribuidor
+    existing_distribuidor_telefono = await collection_distribuidor.find_one(
+        {"phone": distribuidor.phone}
+    )
+    if existing_distribuidor_telefono:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El número de teléfono ya está registrado como distribuidor"
+        )
+
+    # Hashear la contraseña
+    hashed_password = pwd_context.hash(distribuidor.password)
+
+    # Crear el documento del distribuidor
+    distribuidor_dict = distribuidor.dict()
+    distribuidor_dict["nombre"] = distribuidor_dict.pop("name")  # Renombrar 'name' a 'nombre'
+    distribuidor_dict["pais"] = distribuidor.pais  # Asignar el país proporcionado en los datos del distribuidor
+    distribuidor_dict["telefono"] = distribuidor_dict.pop("phone")  # Renombrar 'phone' a 'telefono'
+    distribuidor_dict["correo_electronico"] = distribuidor.correo_electronico
+    distribuidor_dict["hashed_password"] = hashed_password
+    distribuidor_dict["negocio_id"] = str(negocio["_id"])  # Asociar al negocio autenticado
+    distribuidor_dict["rol"] = "Distribuidor"  # Asignar el rol "Distribuidor"
+    del distribuidor_dict["password"]  # Eliminar la contraseña en texto plano
+
+    # Guardar el distribuidor en MongoDB
+    result = await collection_distribuidor.insert_one(distribuidor_dict)
+    if result.inserted_id:
+        distribuidor_dict["id"] = str(result.inserted_id)
+        return distribuidor_dict
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Error al crear el distribuidor"
+    )
+
+# ENDPOINT PARA ACTUALIZAR O EDITAR LOS DATOS DE UN DISTRIBUIDOR
+@app.put("/distribuidores/{distribuidor_id}", response_model=Distribuidor)
+async def editar_distribuidor(
+    distribuidor_id: str,
+    distribuidor_update: DistribuidorUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    # Verificar que el usuario autenticado sea un negocio
+    if current_user["rol"] != "Negocio":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo los negocios pueden editar distribuidores"
+        )
+
+    # Obtener el ID del negocio autenticado
+    negocio = await collection_bussiness.find_one({"correo_electronico": current_user["email"]})
+    if not negocio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El negocio autenticado no existe en la base de datos"
+        )
+
+    # Convertir distribuidor_id a ObjectId
+    try:
+        distribuidor_id_obj = ObjectId(distribuidor_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El ID del distribuidor no es válido"
+        )
+
+    # Buscar el distribuidor en la base de datos
+    distribuidor = await collection_distribuidor.find_one(
+        {"_id": distribuidor_id_obj, "negocio_id": str(negocio["_id"])}
+    )
+    if not distribuidor:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El distribuidor no existe o no pertenece a este negocio"
+        )
+
+    # Actualizar los campos proporcionados
+    update_data = distribuidor_update.dict(exclude_unset=True)
+    if "password" in update_data:
+        update_data["hashed_password"] = pwd_context.hash(update_data["password"])
+        del update_data["password"]
+
+    # Actualizar el distribuidor en MongoDB
+    await collection_distribuidor.update_one(
+        {"_id": distribuidor_id_obj},
+        {"$set": update_data}
+    )
+
+    # Obtener el distribuidor actualizado
+    distribuidor_actualizado = await collection_distribuidor.find_one({"_id": distribuidor_id_obj})
+    distribuidor_actualizado["id"] = str(distribuidor_actualizado["_id"])
+    return distribuidor_actualizado
+
+# ENDPOINT PARA ELIMINAR UN DISTRIBUIDOR
+@app.delete("/distribuidores/{distribuidor_id}")
+async def eliminar_distribuidor(
+    distribuidor_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    # Verificar que el usuario autenticado sea un negocio
+    if current_user["rol"] != "Negocio":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo los negocios pueden eliminar distribuidores"
+        )
+
+    # Obtener el ID del negocio autenticado
+    negocio = await collection_bussiness.find_one({"correo_electronico": current_user["email"]})
+    if not negocio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El negocio autenticado no existe en la base de datos"
+        )
+
+    # Convertir distribuidor_id a ObjectId
+    try:
+        distribuidor_id_obj = ObjectId(distribuidor_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El ID del distribuidor no es válido"
+        )
+
+    # Buscar el distribuidor en la base de datos
+    distribuidor = await collection_distribuidor.find_one(
+        {"_id": distribuidor_id_obj, "negocio_id": str(negocio["_id"])}
+    )
+    if not distribuidor:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El distribuidor no existe o no pertenece a este negocio"
+        )
+
+    # Eliminar el distribuidor
+    await collection_distribuidor.delete_one({"_id": distribuidor_id_obj})
+
+    return {"message": "Distribuidor eliminado correctamente"}
+
+# ENDPOINT PARA OBTENER LOS DISTRIBUIDORES ASOCIADOS A UN NEGOCIO
+@app.get("/distribuidores/negocio/", response_model=List[DistribuidorResponse])
+async def obtener_distribuidores_negocio(current_user: dict = Depends(get_current_user)):
+    # Verificar que el usuario autenticado sea un negocio
+    if current_user["rol"] != "Negocio":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo los negocios pueden ver sus distribuidores"
+        )
+
+    # Buscar el negocio en la colección de negocios
+    negocio = await collection_bussiness.find_one({"correo_electronico": current_user["email"]})
+    if not negocio:
+        raise HTTPException(status_code=404, detail="Negocio no encontrado.")
+
+    # Obtener los distribuidores asociados al negocio
+    distribuidores_cursor = collection_distribuidor.find({"negocio_id": str(negocio["_id"])})
+    distribuidores = await distribuidores_cursor.to_list(length=100)
+
+    # Convertir los resultados en una lista de objetos DistribuidorResponse
+    distribuidores_list = []
+    for distribuidor in distribuidores:
+        distribuidores_list.append(DistribuidorResponse(
+            id=str(distribuidor["_id"]),
+            nombre=distribuidor.get("nombre", "Nombre no disponible"),  # Valor predeterminado
+            correo_electronico=distribuidor.get("correo_electronico", "Correo no disponible"),  # Valor predeterminado
+            telefono=distribuidor.get("telefono", "Teléfono no disponible"),  # Valor predeterminado
+            pais=distribuidor.get("pais", "País no disponible"),  # Valor predeterminado
+            rol=distribuidor.get("rol", "Rol no disponible")  # Valor predeterminado
+        ))
+
+    return distribuidores_list
+
+# ENDPOINT PARA TRAER LOS DATOS DEL DISTRIBUIDOR AUTENTICADO
+@app.get("/distribuidor/me", response_model=Distribuidor)
+async def obtener_distribuidor_autenticado(current_user: dict = Depends(get_current_user)):
+    # Verificar si el usuario es un distribuidor
+    if current_user["rol"] != "Distribuidor":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo los distribuidores pueden acceder a este recurso",
+        )
+
+    # Buscar al distribuidor en la base de datos
+    distribuidor = await collection_distribuidor.find_one({"correo_electronico": current_user["email"]})
+    if not distribuidor:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Distribuidor no encontrado",
+        )
+
+    # Devolver los datos del distribuidor
+    return Distribuidor(
+        nombre=distribuidor["nombre"],
+        telefono=distribuidor["telefono"],
+        correo_electronico=distribuidor["correo_electronico"],
+        pais=distribuidor["pais"],
+        id=str(distribuidor["_id"]),  # Convertir ObjectId a string
+        negocio_id=distribuidor["negocio_id"],
+        rol=distribuidor["rol"],
+    )
+
+# ENDPOINT PARA ELIMINAR UN EMBAJADOR POR EL DISTRIBUIDOR
+@app.delete("/embajadores/{embajador_id}")
+async def eliminar_embajador(
+    embajador_id: str,
+    current_user: dict = Depends(get_current_user)  # Verifica autenticación
+):
+    # Verificar que el usuario autenticado sea un distribuidor
+    if current_user["rol"] != "Distribuidor":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo los distribuidores pueden eliminar embajadores"
+        )
+
+    # Obtener el ID del distribuidor autenticado
+    distribuidor = await collection_distribuidor.find_one({"correo_electronico": current_user["email"]})
+    if not distribuidor:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El distribuidor autenticado no existe en la base de datos"
+        )
+
+    # Convertir `distribuidor["_id"]` a `ObjectId` si no lo es
+    distribuidor_id_obj = distribuidor["_id"] if isinstance(distribuidor["_id"], ObjectId) else ObjectId(distribuidor["_id"])
+
+    # Validar y convertir embajador_id a ObjectId
+    if not ObjectId.is_valid(embajador_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El ID del embajador no es válido"
+        )
+    
+    embajador_id_obj = ObjectId(embajador_id)
+
+    # Buscar el embajador en la base de datos
+    embajador = await collection.find_one(
+        {"_id": embajador_id_obj, "distribuidor_id": distribuidor_id_obj}  # <-- Comparar como ObjectId
+    )
+    if not embajador:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El embajador no existe o no pertenece a este distribuidor"
+        )
+
+    # Eliminar el embajador
+    await collection.delete_one({"_id": embajador_id_obj})
+
+    return {"message": "Embajador eliminado correctamente"}
+
+# ENDPOINT PARA PODER ACTUALIZAR UN EMBAJADOR POR EL DISTRIBUIDOR
+@app.put("/embajadores/{embajador_id}")
+async def editar_embajador(
+    embajador_id: str,
+    embajador_data: EmbajadorUpdate,
+    current_user: dict = Depends(get_current_user)  # Verifica autenticación
+):
+    # Verificar que el usuario autenticado sea un distribuidor
+    if current_user["rol"] != "Distribuidor":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo los distribuidores pueden editar embajadores"
+        )
+
+    # Obtener el ID del distribuidor autenticado
+    distribuidor = await collection_distribuidor.find_one({"correo_electronico": current_user["email"]})
+    if not distribuidor:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El distribuidor autenticado no existe en la base de datos"
+        )
+
+    distribuidor_id_obj = distribuidor["_id"] if isinstance(distribuidor["_id"], ObjectId) else ObjectId(distribuidor["_id"])
+
+    # Validar y convertir embajador_id a ObjectId
+    if not ObjectId.is_valid(embajador_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El ID del embajador no es válido"
+        )
+    
+    embajador_id_obj = ObjectId(embajador_id)
+
+    # Buscar el embajador en la base de datos
+    embajador = await collection.find_one(
+        {"_id": embajador_id_obj, "distribuidor_id": distribuidor_id_obj}
+    )
+    if not embajador:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El embajador no existe o no pertenece a este distribuidor"
+        )
+
+    # Crear el diccionario con los datos a actualizar
+    update_data = {key: value for key, value in embajador_data.dict(exclude_unset=True).items()}
+
+    # Si no hay datos a actualizar, devolver error
+    if not update_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se proporcionaron datos para actualizar"
+        )
+
+    # Actualizar el embajador en la base de datos
+    await collection.update_one(
+        {"_id": embajador_id_obj},
+        {"$set": update_data}
+    )
+
+    return {"message": "Embajador actualizado correctamente"}
+
+# ENDPOINT PARA PODER OBTENER LOS EMBAJADORES ASOCIADOS A UN DISTRIBUIDOR
+@app.get("/distribuidores/{distribuidor_id}/embajadores", response_model=List[dict])
+async def get_embajadores_por_distribuidor(
+    distribuidor_id: str, user: dict = Depends(get_current_user)
+):
+    """Obtiene los embajadores de un distribuidor, asegurando que pertenezca al negocio del usuario autenticado."""
+
+    # Obtener el distribuidor desde la colección correcta
+    distribuidor = await collection_distribuidor.find_one({"_id": ObjectId(distribuidor_id)})
+
+    if not distribuidor:
+        raise HTTPException(status_code=404, detail="Distribuidor no encontrado")
+
+    # Obtener el negocio del distribuidor
+    negocio_id = distribuidor.get("negocio_id")
+    negocio = await collection_bussiness.find_one({"_id": ObjectId(negocio_id)})
+
+    if not negocio:
+        raise HTTPException(status_code=404, detail="El distribuidor no tiene un negocio asignado")
+
+    # Verificar que el usuario autenticado pertenece a ese negocio
+    if user["rol"] != "admin" and user["email"] != negocio.get("correo_electronico"):
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver estos embajadores")
+
+    # 🔍 Detectar si distribuidor_id está almacenado como ObjectId o string
+    embajadores = await collection.find({"distribuidor_id": distribuidor_id}).to_list(length=100)
+
+    if not embajadores:  # Si no encontró, probar con ObjectId
+        embajadores = await collection.find({"distribuidor_id": ObjectId(distribuidor_id)}).to_list(length=100)
+
+    # Convertir ObjectId a string en la respuesta
+    for embajador in embajadores:
+        embajador["_id"] = str(embajador["_id"])
+        embajador["distribuidor_id"] = str(embajador["distribuidor_id"])
+
+    return embajadores
+
+
+# ENDPOINT PARA PARA MOSTRAR LOS EMBAJADORES POR DISTRIBUIDOR
+@app.get("/embajadores", response_model=list)
+async def obtener_embajadores(
+    current_user: dict = Depends(get_current_user)
+):
+    # Verificar que el usuario autenticado sea un distribuidor
+    if current_user["rol"] != "Distribuidor":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo los distribuidores pueden ver sus embajadores"
+        )
+
+    # Buscar el distribuidor en la base de datos
+    distribuidor = await collection_distribuidor.find_one({"correo_electronico": current_user["email"]})
+    if not distribuidor:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El distribuidor autenticado no existe en la base de datos"
+        )
+
+    distribuidor_id_obj = distribuidor["_id"]  # Usar directamente el ObjectId
+
+    # Buscar los embajadores asociados a este distribuidor
+    embajadores = await collection.find({"distribuidor_id": distribuidor_id_obj}).to_list(length=None)
+
+    if not embajadores:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No se encontraron embajadores para este distribuidor"
+        )
+
+    # Convertir ObjectId a string para evitar errores en la respuesta JSON
+    for embajador in embajadores:
+        embajador["_id"] = str(embajador["_id"])
+        embajador["distribuidor_id"] = str(embajador["distribuidor_id"])
+
+    return embajadores
+
+# ENDPOINT PARA OBTENER LOS CLIENTES Y MOSTRAR EN EL NEGOCIO
+@app.get("/negocios/clientes", response_model=List[dict])
+async def obtener_clientes(current_user: dict = Depends(get_current_user)):
+    print(f"🔑 Usuario autenticado: {current_user}")  # Depuración
+
+    # 🔒 Verificar si el usuario tiene rol de negocio
+    if current_user["rol"] != "Negocio":
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    try:
+        # 🔹 Buscar el negocio usando "correo_electronico"
+        negocio = await collection_bussiness.find_one({"correo_electronico": current_user["email"]})
+        print(f"🏢 Negocio encontrado: {negocio}")  # Depuración
+        if not negocio:
+            raise HTTPException(status_code=404, detail="Negocio no encontrado")
+
+        negocio_id = str(negocio["_id"])  # Convertir ObjectId a string
+
+        # 🔹 Obtener distribuidores del negocio
+        distribuidores_cursor = collection_distribuidor.find({"negocio_id": negocio_id}, {"_id": 1})
+        distribuidores = await distribuidores_cursor.to_list(length=None)
+        print(f"📦 Distribuidores encontrados: {distribuidores}")  # Depuración
+        if not distribuidores:
+            return []
+
+        # Extraer IDs de distribuidores
+        distribuidor_ids = [str(d["_id"]) for d in distribuidores]
+
+        # 🔹 Obtener embajadores de los distribuidores (CORREGIDO)
+        embajadores_cursor = collection.find(
+            {"distribuidor_id": {"$in": [ObjectId(d_id) for d_id in distribuidor_ids]}}, 
+            {"_id": 1, "email": 1}
+        )
+        embajadores = await embajadores_cursor.to_list(length=None)
+        print(f"🧑‍💼 Embajadores encontrados: {embajadores}")  # Depuración
+        if not embajadores:
+            return []
+
+        # Extraer emails de embajadores (los clientes los referencian por email)
+        embajador_emails = [e["email"] for e in embajadores]
+
+        # 🔹 Obtener clientes referidos por esos embajadores
+        clientes_cursor = collection_client.find({"ref": {"$in": embajador_emails}})
+        clientes = await clientes_cursor.to_list(length=None)
+        print(f"👥 Clientes encontrados: {clientes}")  # Depuración
+
+        return [
+            {
+                "id": str(cliente["_id"]),
+                "nombre": cliente["nombre"],
+                "correo_electronico": cliente["correo_electronico"],
+                "telefono": cliente["telefono"],
+                "referido_por": cliente["ref"]
+            }
+            for cliente in clientes
+        ]
+
+    except Exception as e:
+        print(f"❌ Error: {e}")  # Depuración
+        raise HTTPException(status_code=500, detail=str(e))
+
+    
+    
+    
+    
