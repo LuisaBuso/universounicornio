@@ -60,7 +60,7 @@ export function DetailedCustomerModal({ isOpen, onClose, customer }: DetailedCus
       }
 
       try {
-        const response = await fetch(`http://localhost:8000/orders/${customer.email}`, {
+        const response = await fetch(`https://api.unicornio.tech/orders/${customer.email}`, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",

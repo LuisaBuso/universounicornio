@@ -32,8 +32,8 @@ export function OrderList() {
       // Definir el endpoint basado en el rol
       const endpoint =
         storedRole === "Negocio" || storedRole === "Distribuidor"
-          ? "http://127.0.0.1:8000/pedidos"
-          : "http://127.0.0.1:8000/orders-by-ambassador";
+          ? "https://api.unicornio.tech/pedidos"
+          : "https://api.unicornio.tech/orders-by-ambassador";
 
       try {
         const response = await fetch(endpoint, {

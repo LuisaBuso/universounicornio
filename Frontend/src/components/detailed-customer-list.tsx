@@ -40,7 +40,7 @@ export function CustomerList({ searchTerm }: CustomerListProps) {
       }
   
       try {
-        const response = await fetch("http://localhost:8000/clients-orders", {
+        const response = await fetch("https://api.unicornio.tech/clients-orders", {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
