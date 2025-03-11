@@ -1101,7 +1101,9 @@ async def editar_distribuidor(
 
     # Actualizar los campos proporcionados
     update_data = distribuidor_update.dict(exclude_unset=True)
-    if "password" in update_data:
+
+    # Manejo de la contraseña
+    if "password" in update_data and update_data["password"]:
         update_data["hashed_password"] = pwd_context.hash(update_data["password"])
         del update_data["password"]
 
@@ -1530,22 +1532,53 @@ async def obtener_pedidos(current_user: dict = Depends(get_current_user)):
 
 # ENDPOINT PARA OBTENER LOS CLIENTES DE LA RED DEL NEGOCIO
 @app.get("/clients-orders")
-async def get_clients_orders():
+async def get_clients_orders(current_user: dict = Depends(get_current_user)):
     """
     Obtiene la lista de clientes con sus datos y sus pedidos.
+    - Los negocios ven los clientes de todos los embajadores de su red.
+    - Los embajadores ven solo sus propios clientes.
+    - Los distribuidores ven los clientes de los embajadores de su negocio.
     """
-    clients_cursor = collection_client.find({}, {
+    # Verificar el rol del usuario
+    if current_user["rol"] not in ["Negocio", "Embajador", "Distribuidor"]:
+        raise HTTPException(status_code=403, detail="Acceso denegado: Rol no autorizado")
+
+    user_email = current_user["email"]
+    user_rol = current_user["rol"]
+
+    if user_rol in ["Negocio", "Distribuidor"]:
+        # Negocio y Distribuidor: Obtener el negocio asociado
+        negocio = await collection_bussiness.find_one({"correo_electronico": user_email}, {"_id": 1})
+        
+        if not negocio:
+            # Si es distribuidor, buscar el negocio al que pertenece
+            distribuidor = await collection_distribuidor.find_one({"correo_electronico": user_email}, {"negocio_id": 1})
+            if not distribuidor:
+                raise HTTPException(status_code=404, detail="Negocio o Distribuidor no encontrado")
+            negocio_id = str(distribuidor["negocio_id"])
+        else:
+            negocio_id = str(negocio["_id"])
+
+        # Obtener todos los embajadores asociados a ese negocio
+        embajadores = await collection.find({"negocio_id": negocio_id}, {"email": 1}).to_list(length=None)
+        embajador_emails = [e["email"] for e in embajadores]
+
+    elif user_rol == "Embajador":
+        # Embajador: Obtener solo sus clientes
+        embajador_emails = [user_email]
+
+    # Obtener los clientes asociados a esos embajadores (usando el campo "ref")
+    clients_cursor = collection_client.find({"ref": {"$in": embajador_emails}}, {
         "_id": 1,
         "nombre": 1,
         "correo_electronico": 1,
         "telefono": 1,
         "ref": 1
     })
-    
     clients = await clients_cursor.to_list(length=None)
 
     formatted_clients = []
-    
+
     for client in clients:
         client_email = client.get("correo_electronico", "")
 
