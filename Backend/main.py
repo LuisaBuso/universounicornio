@@ -39,17 +39,17 @@ BUSINESS_CREDENTIALS = {
     "67b4ec6810a08e4b0f7c6dd8": {  # Green Energy Ltda.
         "access_token": os.getenv("GREEN_ENERGY_ACCESS_TOKEN", "").strip(),
         "public_key": os.getenv("GREEN_ENERGY_PUBLIC_KEY", "").strip(),
-        "domain": "https://rizosfelicesmx.unicornio.tech/"
+        "domain": "https://rizosfelicesmx.unicornio.tech/catalog"
     },
     "67cb61058d171ae47134abe5": {  # Rizos Felices México
         "access_token": os.getenv("RIZOS_FELICES_MEXICO_ACCESS_TOKEN", "").strip(),
         "public_key": os.getenv("RIZOS_FELICES_MEXICO_PUBLIC_KEY", "").strip(),
-        "domain": "https://rizosfelicesmx.unicornio.tech/"
+        "domain": "https://rizosfelicesmx.unicornio.tech/catalog"
     },
     "67cb603a8d171ae47134abe4": {  # Rizos Felices Pachuca
         "access_token": os.getenv("RIZOS_FELICES_PACHUCA_ACCESS_TOKEN", "").strip(),
         "public_key": os.getenv("RIZOS_FELICES_PACHUCA_PUBLIC_KEY", "").strip(),
-        "domain": "https://rizosfelicesmx.unicornio.tech/"
+        "domain": "https://rizosfelicesmx.unicornio.tech/catalog"
     }
 }
 import os
@@ -380,7 +380,8 @@ async def create_preference(request: PreferenceRequest):
         print("✅ Credenciales del negocio obtenidas")
 
         # 6. Calcular el total del pedido
-        total = sum(item.unit_price * item.quantity for item in request.items)
+        subtotal = sum(item.unit_price * item.quantity for item in request.items)
+        total = subtotal + request.costo_envio  # Sumar el costo de envío
         print("✅ Total del pedido calculado:", total)
 
         # 7. Guardar el pedido en MongoDB
@@ -398,15 +399,25 @@ async def create_preference(request: PreferenceRequest):
             ref=request.ref,
             productos=request.items,
             total=total,
+            costo_envio=request.costo_envio,  # Incluir el costo de envío
         )
 
         result = await collection_pedidos.insert_one(pedido_data.dict())
         pedido_id = str(result.inserted_id)
         print("✅ Pedido guardado en MongoDB con ID:", pedido_id)
 
-        # 8. Crear la preferencia de pago en Mercado Pago
+        # Crear la preferencia de pago en Mercado Pago
         preference_data = {
-            "items": [{"title": item.title, "quantity": item.quantity, "unit_price": item.unit_price} for item in request.items],
+            "items": [
+                # Incluir los productos
+                *[{"title": item.title, "quantity": item.quantity, "unit_price": item.unit_price} for item in request.items],
+                # Incluir el costo de envío como un ítem adicional
+                {
+                    "title": "Costo de envío",
+                    "quantity": 1,
+                    "unit_price": request.costo_envio,
+                },
+            ],
             "external_reference": pedido_id,  # ID del pedido en MongoDB
             "back_urls": {
                 "success": f"{credenciales['domain']}?ref={request.ref}",
@@ -557,84 +568,131 @@ async def webhook(request: Request):
     """
     try:
         # Leer los datos enviados por Mercado Pago
-        payment = await request.json()
-        print("Notificación recibida:", payment)
+        notification = await request.json()
+        print("📥 Notificación recibida:", notification)
 
         # Obtener el payment_id desde los datos recibidos
-        payment_id = payment.get("data", {}).get("id") or payment.get("id")  
+        payment_id = notification.get("data", {}).get("id")
         if not payment_id:
+            print("❌ No se recibió un payment_id válido")
             raise HTTPException(status_code=400, detail="No se recibió un payment_id válido")
 
-        # Consultar el pago en Mercado Pago (pero primero obtener el negocio correcto)
-        pedido = await collection_pedidos.find_one({"_id": ObjectId(payment.get("external_reference"))})
+        print("🔍 Payment ID obtenido:", payment_id)
+
+        # Consultar los detalles del pago usando la API de Mercado Pago
+        # Primero, necesitamos obtener el access_token correcto
+        # Para esto, debemos encontrar el pedido asociado al pago
+        # Pero como el external_reference no está en la notificación, debemos consultar el pago primero
+
+        # Usar un access_token temporal para obtener el external_reference
+        # Aquí usamos el primer access_token disponible en BUSINESS_CREDENTIALS
+        first_business_id = next(iter(BUSINESS_CREDENTIALS))
+        access_token = BUSINESS_CREDENTIALS[first_business_id]["access_token"]
+        print("🔑 Access token temporal usado:", access_token)
+
+        url = f"https://api.mercadopago.com/v1/payments/{payment_id}"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        response = requests.get(url, headers=headers)
+
+        if response.status_code != 200:
+            print(f"❌ Error al consultar el pago: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Error consultando detalles del pago: {response.text}"
+            )
+
+        payment_data = response.json()
+        print("📄 Detalles del pago recibidos:", payment_data)
+
+        # Obtener el external_reference desde los detalles del pago
+        external_reference = payment_data.get("external_reference")
+        if not external_reference:
+            print("❌ No se encontró el external_reference en los detalles del pago")
+            raise HTTPException(status_code=400, detail="No se encontró el external_reference en los detalles del pago")
+
+        print("🔍 External reference obtenido:", external_reference)
+
+        # Buscar el pedido en la base de datos usando el external_reference
+        pedido = await collection_pedidos.find_one({"_id": ObjectId(external_reference)})
+        print("📄 Pedido asociado al pago:", pedido)
         if not pedido:
+            print("❌ Pedido no encontrado en la base de datos")
             raise HTTPException(status_code=404, detail="Pedido no encontrado en la base de datos")
 
         # Buscar al embajador asociado con el pedido
         embajador = await collection.find_one({"email": pedido["ref"]})
         if not embajador:
+            print("❌ Embajador no encontrado")
             raise HTTPException(status_code=404, detail="Embajador no encontrado")
+
+        print("👤 Embajador encontrado:", embajador)
 
         # Obtener el negocio asociado al embajador
         negocio_id = embajador.get("negocio_id")
         if not negocio_id or negocio_id not in BUSINESS_CREDENTIALS:
+            print("❌ El embajador no tiene un negocio válido con credenciales")
             raise HTTPException(status_code=400, detail="El embajador no tiene un negocio válido con credenciales")
 
-        access_token = BUSINESS_CREDENTIALS[negocio_id]["access_token"]
+        print("🏢 Negocio ID encontrado:", negocio_id)
 
-        # Consultar los detalles del pago usando la API de Mercado Pago
+        # Obtener el access_token del negocio correcto
+        access_token = BUSINESS_CREDENTIALS[negocio_id]["access_token"]
+        print("🔑 Access token del negocio:", access_token)
+
+        # Consultar nuevamente los detalles del pago usando el access_token correcto
         url = f"https://api.mercadopago.com/v1/payments/{payment_id}"
         headers = {"Authorization": f"Bearer {access_token}"}
         response = requests.get(url, headers=headers)
 
-        # Manejo de la respuesta de la API de Mercado Pago
-        if response.status_code == 200:
-            payment_data = response.json()
-
-            # Extraer solo los campos necesarios
-            filtered_data = {
-                "id": payment_data.get("id"),
-                "status": payment_data.get("status"),
-                "date_created": payment_data.get("date_created"),
-                "date_approved": payment_data.get("date_approved"),
-                "external_reference": payment_data.get("external_reference"),
-                "timestamp": datetime.utcnow()  # Agregar un timestamp para saber cuándo se guardó
-            }
-
-            print("Detalles del pago filtrados:", filtered_data)
-
-            # Guardar los datos en MongoDB (usando motor)
-            result = await collection_transaction.insert_one(filtered_data)
-            if result.inserted_id:
-                print("Datos guardados en MongoDB con ID:", result.inserted_id)
-
-                # Convertir el ObjectId a una cadena para la respuesta
-                filtered_data["_id"] = str(result.inserted_id)
-
-                return {"status": "success", "message": "Datos guardados en MongoDB", "payment_data": filtered_data}
-            else:
-                print("Error al guardar los datos en MongoDB")
-                raise HTTPException(status_code=500, detail="Error al guardar los datos en MongoDB")
-        else:
-            print(f"Error al consultar el pago: {response.status_code} - {response.text}")
+        if response.status_code != 200:
+            print(f"❌ Error al consultar el pago: {response.status_code} - {response.text}")
             raise HTTPException(
                 status_code=response.status_code,
                 detail=f"Error consultando detalles del pago: {response.text}"
             )
+
+        payment_data = response.json()
+        print("📄 Detalles del pago recibidos (con access_token correcto):", payment_data)
+
+        # Extraer solo los campos necesarios
+        filtered_data = {
+            "id": payment_data.get("id"),
+            "status": payment_data.get("status"),
+            "date_created": payment_data.get("date_created"),
+            "date_approved": payment_data.get("date_approved"),
+            "external_reference": payment_data.get("external_reference"),
+            "timestamp": datetime.utcnow()  # Agregar un timestamp para saber cuándo se guardó
+        }
+
+        print("📄 Detalles del pago filtrados:", filtered_data)
+
+        # Guardar los datos en MongoDB (usando motor)
+        result = await collection_transaction.insert_one(filtered_data)
+        if result.inserted_id:
+            print("✅ Datos guardados en MongoDB con ID:", result.inserted_id)
+
+            # Convertir el ObjectId a una cadena para la respuesta
+            filtered_data["_id"] = str(result.inserted_id)
+
+            return {"status": "success", "message": "Datos guardados en MongoDB", "payment_data": filtered_data}
+        else:
+            print("❌ Error al guardar los datos en MongoDB")
+            raise HTTPException(status_code=500, detail="Error al guardar los datos en MongoDB")
+
     except Exception as e:
-        print("Error procesando el webhook:", e)
+        print("❌ Error procesando el webhook:", e)
         raise HTTPException(status_code=500, detail="Error procesando el webhook")
 
 # ENDPOINT PARA CALCULAR LA COMISION DE UN EMBAJADOR
 @app.post("/calcular-comision", summary="Calcular comisión para el embajador autenticado")
-async def calcular_comision(current_user: str = Depends(get_current_user)):
+async def calcular_comision(current_user: dict = Depends(get_current_user)):
     """
     Endpoint protegido para calcular la comisión del embajador autenticado.
     Solo se calcula la comisión para pedidos con estado "approved".
     """
     try:
         # Buscar al embajador autenticado en la colección ambassador
-        embajador = await collection.find_one({"email": current_user})
+        embajador = await collection.find_one({"email": current_user["email"]})  # Acceder al campo "email"
         if not embajador:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -643,6 +701,7 @@ async def calcular_comision(current_user: str = Depends(get_current_user)):
 
         # Obtener el ObjectId del embajador autenticado
         embajador_id = str(embajador["_id"])
+        print(f"🔍 Embajador encontrado: {embajador_id}")
 
         # Obtener todos los pedidos asociados al embajador con estado "approved"
         pedidos_cursor = collection_pedidos.find({
@@ -650,27 +709,32 @@ async def calcular_comision(current_user: str = Depends(get_current_user)):
             "status": "approved"  # Filtrar solo pedidos con estado "approved"
         })
         pedidos_aprobados = await pedidos_cursor.to_list(length=100)
+        print(f"📦 Pedidos aprobados encontrados: {len(pedidos_aprobados)}")
 
-        # Calcular el total de ventas solo para pedidos aprobados
-        total_ventas = sum(pedido["total"] for pedido in pedidos_aprobados)
+        # Calcular el subtotal (total menos costo_envio) para cada pedido
+        subtotal_ventas = sum(pedido["total"] - pedido.get("costo_envio", 0) for pedido in pedidos_aprobados)
+        print(f"💰 Subtotal de ventas aprobadas (después de restar costo_envio): {subtotal_ventas}")
 
-        # Calcular la comisión (25% del total de ventas)
-        comision = total_ventas * 0.25
+        # Calcular la comisión (25% del subtotal de ventas)
+        comision = subtotal_ventas * 0.25
+        print(f"💸 Comisión calculada: {comision}")
 
         # Crear o actualizar la wallet del embajador
         wallet = {
             "embajador_id": embajador_id,
-            "total_ventas": total_ventas,
+            "total_ventas": subtotal_ventas,  # Usar el subtotal en lugar del total
             "comision": comision,
             "fecha_actualizacion": datetime.utcnow()
         }
+        print(f"📝 Wallet a actualizar: {wallet}")
 
         # Insertar o actualizar en la colección wallet
-        await collection_wallet.update_one(
+        result = await collection_wallet.update_one(
             {"embajador_id": embajador_id},
             {"$set": wallet},
             upsert=True
         )
+        print(f"✅ Resultado de la actualización de wallet: {result.modified_count} documentos modificados")
 
         return {
             "message": "Comisión calculada y wallet actualizada",
@@ -678,6 +742,7 @@ async def calcular_comision(current_user: str = Depends(get_current_user)):
         }
 
     except Exception as e:
+        print(f"❌ Error al calcular la comisión: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error al calcular la comisión"
@@ -772,13 +837,13 @@ async def get_dashboard_metrics(current_user: dict = Depends(get_current_user)):
 
 # ENDPOINT PARA OBTENER LA COMISION DE LA CARTERA POR EMBAJADOR
 @app.get("/wallet/comision-actualizada", summary="Obtener la comisión de la cartera")
-async def obtener_comision_actualizada(current_user: str = Depends(get_current_user)):
+async def obtener_comision_actualizada(current_user: dict = Depends(get_current_user)):
     """
     Endpoint protegido para obtener la comisión del embajador autenticado.
     """
     try:
         # Buscar al embajador autenticado
-        embajador = await collection.find_one({"email": current_user})
+        embajador = await collection.find_one({"email": current_user["email"]})  # Acceder al campo "email"
         if not embajador:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -800,18 +865,12 @@ async def obtener_comision_actualizada(current_user: str = Depends(get_current_u
         }
 
     except Exception as e:
+        print(f"❌ Error en el endpoint: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error al obtener la información de la cartera"
         ) from e
-
-    except Exception as e:
-        print(f"Error en el endpoint: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error al obtener la información de la cartera"
-        ) from e
-        
+ 
 # ENDPOINT PARA OBTENER LOS PEDIDOS DE UN CLIENTE ESPECIFICO POR EMBAJADOR
 @app.get("/orders-by-client/{client_email}", response_model=List[Order])
 async def get_orders_by_client(client_email: str, current_user: str = Depends(get_current_user)):
