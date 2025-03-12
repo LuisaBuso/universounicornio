@@ -175,3 +175,5 @@ class EmbajadorUpdate(BaseModel):
     whatsapp_number: Optional[str] = None
     email: Optional[str] = None
     pais: Optional[str] = None
+    
+    
