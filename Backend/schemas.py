@@ -46,6 +46,7 @@ class PreferenceRequest(BaseModel):
     correo_electronico: str
     ref: str
     items: List[ProductItem]
+    costo_envio: float  # Nuevo campo para el costo de envío
 
 class PedidoMongo(BaseModel):
     cedula: str
@@ -61,6 +62,7 @@ class PedidoMongo(BaseModel):
     ref: str
     productos: List[ProductItem]
     total: float
+    costo_envio: float  # Nuevo campo para el costo de envío
     status: Optional[str] = "pending"
     date_created: Optional[str] = datetime.utcnow().isoformat()
     transaction_id: Optional[str] = None
