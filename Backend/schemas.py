@@ -73,7 +73,6 @@ class ClientCreate(BaseModel):
     email: str
     whatsapp_phone: str
     instagram: Optional[str] = None
-    ref: str  # Referencia al embajador (correo del embajador)
 
 # CLASE PARA TRAER LOS PEDIDOS DE LOS CLIENTES POR EMBAJADOR
 class Order(BaseModel):

@@ -271,7 +271,7 @@ async def get_user_profile(current_user: dict = Depends(get_current_user)):
     return profile_data
 
 # ENDPOINT PARA OBTENER LOS CLIENTES ASOCIADOS A UN EMBAJADOR
-@app.get("/clients", response_model=List[ClientData])
+@app.get("/clientes", response_model=List[ClientData])
 async def get_clients(current_user: dict = Depends(get_current_user)):
     """
     Obtiene los clientes asociados al embajador autenticado.
@@ -308,27 +308,24 @@ async def get_clients(current_user: dict = Depends(get_current_user)):
 
 # ENDPOINT PARA CREAR UN CLIENTE ASOSIADO A UN EMBAJADOR
 @app.post("/clients", response_model=ClientCreate)
-async def create_client(client_data: ClientCreate, current_user: str = Depends(get_current_user)):
+async def create_client(client_data: ClientCreate, current_user: dict = Depends(get_current_user)):
     """
     Guarda un nuevo cliente asociado al embajador autenticado.
     """
-    # Verificar si el embajador existe
-    ambassador = await collection.find_one({"email": current_user})
-    if not ambassador:
-        raise HTTPException(status_code=404, detail="Embajador no encontrado")
+    print("📢 Usuario autenticado:", current_user)  # Debugging
 
     # Verificar si el cliente ya existe (por correo electrónico)
-    existing_client = await collection_client.find_one({"email": client_data.email})
+    existing_client = await collection_client.find_one({"correo_electronico": client_data.email})
     if existing_client:
         raise HTTPException(status_code=400, detail="El cliente ya existe")
 
-    # Crear el documento del cliente
+    # Crear el documento del cliente con `ref` asignado automáticamente
     client_document = {
         "nombre": client_data.name,
         "correo_electronico": client_data.email,
         "telefono": client_data.whatsapp_phone,
         "instagram": client_data.instagram,
-        "ref": client_data.ref,  # Asociar el cliente al embajador
+        "ref": current_user["email"],  # Se asigna automáticamente
     }
 
     # Insertar el cliente en la colección
@@ -336,8 +333,8 @@ async def create_client(client_data: ClientCreate, current_user: str = Depends(g
     if not result.inserted_id:
         raise HTTPException(status_code=500, detail="Error al guardar el cliente")
 
-    # Devolver los datos del cliente guardado
-    return {**client_data.dict(), "id": str(result.inserted_id)}
+    # Devolver los datos del cliente guardado con `ref`
+    return {**client_data.dict(), "id": str(result.inserted_id), "ref": current_user["email"]}
 
 
 # ENDPOINT PARA CREAR UN PEDIDO Y LA PREFERENCIA CON MERCADO PAGO
