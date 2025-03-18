@@ -74,7 +74,6 @@ class ClientCreate(BaseModel):
 
 # CLASE PARA TRAER LOS PEDIDOS DE LOS CLIENTES POR EMBAJADOR
 class Order(BaseModel):
-    cedula: str
     nombre: str
     apellidos: str
     pais_region: str

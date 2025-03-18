@@ -925,7 +925,6 @@ async def get_orders_by_client(client_email: str, current_user: str = Depends(ge
             detail=f"Error interno del servidor: {str(e)}"
         )
 
-
 # ENDPOINT PARA OBTENER LOS PEDIDOS APROBADOS POR EMBAJADOR PARA LA WALLET
 @app.get("/approved-orders", response_model=List[ApprovedOrderResponse])
 async def get_approved_orders(current_user: dict = Depends(get_current_user)):
