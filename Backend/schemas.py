@@ -34,7 +34,6 @@ class ProductItem(BaseModel):
 
 # CLASES PARA LA CREACION DE PEDIDOS Y LA PREFERENCIA DE PAGO CON MERCADO PAGO
 class PreferenceRequest(BaseModel):
-    cedula: str
     nombre: str
     apellidos: str
     pais_region: str
@@ -49,7 +48,6 @@ class PreferenceRequest(BaseModel):
     costo_envio: float  # Nuevo campo para el costo de envío
 
 class PedidoMongo(BaseModel):
-    cedula: str
     nombre: str
     apellidos: str
     pais_region: str

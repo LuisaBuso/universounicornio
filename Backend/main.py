@@ -383,7 +383,6 @@ async def create_preference(request: PreferenceRequest):
 
         # 7. Guardar el pedido en MongoDB
         pedido_data = PedidoMongo(
-            cedula=request.cedula,
             nombre=request.nombre,
             apellidos=request.apellidos,
             pais_region=request.pais_region,
