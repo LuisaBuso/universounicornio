@@ -383,7 +383,6 @@ async def create_preference(request: PreferenceRequest):
 
         # 7. Guardar el pedido en MongoDB
         pedido_data = PedidoMongo(
-            cedula=request.cedula,
             nombre=request.nombre,
             apellidos=request.apellidos,
             pais_region=request.pais_region,
@@ -537,7 +536,6 @@ async def get_orders_by_ambassador(current_user: dict = Depends(get_current_user
             await collection_client.insert_one(cliente_data)
         
         order_list.append(Order(
-            cedula=order.get('cedula'),
             nombre=order.get('nombre'),
             apellidos=order.get('apellidos'),
             pais_region=order.get('pais_region'),
@@ -902,7 +900,6 @@ async def get_orders_by_client(client_email: str, current_user: str = Depends(ge
         order_list = []
         for order in orders:
             order_list.append(Order(
-                cedula=order.get('cedula'),
                 nombre=order.get('nombre'),
                 apellidos=order.get('apellidos'),
                 pais_region=order.get('pais_region'),
