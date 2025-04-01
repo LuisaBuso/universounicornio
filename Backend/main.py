@@ -50,7 +50,13 @@ BUSINESS_CREDENTIALS = {
         "access_token": os.getenv("RIZOS_FELICES_PACHUCA_ACCESS_TOKEN", "").strip(),
         "public_key": os.getenv("RIZOS_FELICES_PACHUCA_PUBLIC_KEY", "").strip(),
         "domain": "https://rizosfelicesmx.unicornio.tech/catalog"
+    },
+    "67eafe82a4ff891b5f412dc9": {  # Rizos Felices Pachuca
+        "access_token": os.getenv("RIZOS_FELICES_COLOMBIA_ACCESS_TOKEN", "").strip(),
+        "public_key": os.getenv("RIZOS_FELICES_COLOMBIA_PUBLIC_KEY", "").strip(),
+        "domain": "https://rizosfelicesco.unicornio.tech/catalog"
     }
+    
 }
 import os
 
