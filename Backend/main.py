@@ -56,7 +56,6 @@ BUSINESS_CREDENTIALS = {
         "public_key": os.getenv("RIZOS_FELICES_COLOMBIA_PUBLIC_KEY", "").strip(),
         "domain": "https://rizosfelicesco.unicornio.tech/catalog"
     }
-    
 }
 import os
 
